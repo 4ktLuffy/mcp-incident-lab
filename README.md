@@ -81,6 +81,27 @@ The real model handles the loud failures well: it retries and then tells the use
 
 So the two gaps in the Python integration (#7890, #7916) are already handled on the JS side, which gives the Python fixes a reference to match.
 
+## Over stdio
+
+`lab.py --transport stdio` runs the same scenarios with the Python server as a child process of the agent (`python -m server.server --stdio`, started once per run). Over stdio there are no HTTP headers, so the fault and run id travel in the env vars `LAB_FAULT` and `LAB_RUN_ID`, and no trace context reaches the server: its spans start a new trace. To find them again the server tags them `lab.run_id` (lab instrumentation only), and `--readback` looks them up by that tag and marks them "in a separate trace". Results go to `runs-stdio/`.
+
+```
+.venv/bin/python lab.py --offline-dsn --transport stdio
+.venv/bin/python lab.py --readback --transport stdio
+```
+
+In the slow scenario the client's `close()` ends the server process, which cancels the running call; the truth row then records the cut-off call (about 2 s, no result) instead of a finished 6 s call.
+
+Results (live, 12 runs):
+
+| Scenario | Over HTTP | Over stdio |
+|---|---|---|
+| All | tool span in the agent's trace | tool span in a **separate trace**, nothing links it to the agent |
+| Tool error | tool span ok | tool span status unknown, not error |
+| Slow tool | tool span missing | the client's close cancels the tool; its span arrives as `internal_error` (2 s) |
+
+Why separate: the Python MCP integration doesn't read trace context from the MCP request (`params._meta`), and nothing on the JS client side would put it there. Over HTTP the trace only joins because the ASGI integration continues it from the headers. This is a known gap, tracked in [getsentry/sentry-python#5205](https://github.com/getsentry/sentry-python/issues/5205). Setting `SENTRY_TRACE` in the server's environment does not help either: the integration starts a new transaction. To find the stdio spans at all, the lab tags them with `lab.run_id` and looks them up by that tag.
+
 ## Reported
 
 - Tool error recorded as ok: [getsentry/sentry-python#7890](https://github.com/getsentry/sentry-python/issues/7890)

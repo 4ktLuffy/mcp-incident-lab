@@ -91,3 +91,22 @@ def test_join_and_propagation():
 def test_truth_failed_counts_client_timeout():
     assert labcore.truth_failed({"is_error": False}, {"tool_result_seen": {"threw": "timeout"}})
     assert not labcore.truth_failed({"is_error": False}, {"tool_result_seen": {"threw": None}})
+
+
+def test_separate_trace_is_visible():
+    sep = {**span("mcp.server"), "separate_trace": True}
+    s = labcore.summarize_spans([sep, span("gen_ai.execute_tool")])
+    assert s["py_span_found"] and s["separate_trace"] and not s["joined"]
+    assert "in a separate trace" in labcore.sentry_cell(s)
+    same = labcore.summarize_spans([span("mcp.server"), span("gen_ai.execute_tool")])
+    assert same["joined"] and not same["separate_trace"] and "separate" not in labcore.sentry_cell(same)
+    assert labcore.verdict(False, False, s) == "invisible"   # found, so not "missing"
+
+
+def test_what_happened_stdio_slow():
+    a = {"tool_result_seen": {"threw": "timeout"}}
+    assert labcore.what_happened("slow", None, a, 42, 2000, "stdio") == "server process ended before the tool finished"
+    cut = {"returned": None, "is_error": False, "duration_ms": 2002.1}
+    assert "before it finished" in labcore.what_happened("slow", cut, a, 42, 2000, "stdio")
+    done = {"returned": {"in_stock": 42}, "is_error": False, "duration_ms": 6002.0}
+    assert "took 6002 ms" in labcore.what_happened("slow", done, a, 42, 2000)

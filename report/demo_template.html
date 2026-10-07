@@ -55,7 +55,7 @@ h1{font-size:28px;line-height:1.15;margin:0;text-wrap:balance;letter-spacing:-.0
 .hedge{background:var(--soft);color:var(--accent)}.v-lucky{color:var(--warn)}.v-visible{color:var(--warn)}.v-misleading,.v-invisible,.v-missing{color:var(--bad)}
 .trace{overflow-x:auto}
 .rows{min-width:640px;display:grid;gap:2px}
-.row{display:grid;grid-template-columns:34px minmax(220px,2.2fr) minmax(120px,1fr) 64px 58px;gap:8px;align-items:center;font-size:13px;padding:3px 4px;border-radius:5px}
+.row{display:grid;grid-template-columns:34px minmax(220px,2.2fr) minmax(120px,1fr) 64px 92px;gap:8px;align-items:center;font-size:13px;padding:3px 4px;border-radius:5px}
 .row.flagged{background:var(--soft)}
 .side{font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;text-align:center;color:var(--panel)}
 .side.js{background:var(--js)}.side.py{background:var(--py)}
@@ -64,10 +64,10 @@ h1{font-size:28px;line-height:1.15;margin:0;text-wrap:balance;letter-spacing:-.0
 .track{position:relative;height:12px;background:var(--soft);border-radius:3px}
 .bar{position:absolute;top:0;bottom:0;border-radius:3px;min-width:2px}
 .bar.ok{background:var(--ok)}.bar.error{background:var(--bad)}
-.bar.missing{background:transparent;border:1.5px dashed var(--ghost)}
+.bar.missing{background:transparent;border:1.5px dashed var(--ghost)}.bar.unknown{background:var(--ghost)}
 .dur{font-family:var(--mono);text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
 .st{font-size:12px;font-weight:700;text-align:right}
-.st.ok{color:var(--ok)}.st.error{color:var(--bad)}.st.missing{color:var(--ghost)}
+.st.ok{color:var(--ok)}.st.error{color:var(--bad)}.st.missing,.st.unknown{color:var(--ghost)}
 .flag{grid-column:2 / -1;font-size:12px;font-weight:600;margin:-2px 0 4px}
 .flag.false{color:var(--warn)}.flag.rec{color:var(--accent)}.flag.hand{color:var(--muted)}.flag.lie,.flag.gone{color:var(--bad)}.flag.real{color:var(--muted)}
 .row.ghost .op{color:var(--ghost)}
@@ -93,6 +93,7 @@ h1{font-size:28px;line-height:1.15;margin:0;text-wrap:balance;letter-spacing:-.0
       <button type="button" data-mode="today" aria-pressed="true">Today's SDKs</button>
       <button type="button" data-mode="fixed" aria-pressed="false">With fixes</button>
       <button type="button" data-mode="js" aria-pressed="false">JS MCP server</button>
+      <button type="button" data-mode="stdio" aria-pressed="false">Over stdio</button>
       <button type="button" data-mode="codex" aria-pressed="false">Real model</button>
     </div>
   </div>
@@ -138,6 +139,7 @@ let mode = "today", current = "tool_error", sku = "SKU-1001";
 const SKUS = [...new Set(DATA.today.map((d) => d.sku))];
 const MODE_NOTE = {today: "Released SDKs: sentry-sdk 2.71.0, @sentry/node 11.4.0.",
   fixed: "Same scenarios, rerun with the fixes on. Switch back and forth to compare.",
+  stdio: "Same scenarios, but the agent starts the Python MCP server as a local process and talks to it over stdio instead of HTTP.",
   codex: "Same scenarios, but the agent's model is a real one (gpt-5.6-sol, low effort, through the Codex CLI, no API key) instead of the scripted one.",
   js: "Same agent and scenarios, but the MCP server is written in JavaScript (@sentry/node 11.4.0 with wrapMcpServerWithSentry) instead of Python."};
 function show(id){
@@ -163,13 +165,14 @@ function show(id){
     + `<li class="step reveal" style="animation-delay:480ms"><div class="truth">Server log: ${esc(s.truth)}</div></li>`;
   const end = Math.max(...s.spans.map((x) => x.start + x.dur));
   $("rows").innerHTML = s.spans.map((x, i) => {
+    const cls = ["ok", "missing", "unknown"].includes(x.status) ? x.status : "error";
     const left = (x.start / end) * 100, width = Math.max((x.dur / end) * 100, 0.4);
     const row = `<div class="row ${x.flag ? "flagged" : ""} ${x.ghost ? "ghost" : ""} reveal" style="animation-delay:${200 + i*25}ms">
       <span class="side ${x.side === "JS agent" ? "js" : "py"}">${x.side === "JS agent" ? "JS" : x.side === "JS MCP server" ? "JS·S" : "PY"}</span>
       <span class="op" title="${esc(x.op + " " + x.desc)}">${esc(x.op)} <span>${esc(x.desc)}</span></span>
-      <span class="track"><span class="bar ${x.status}" style="left:${left}%;width:${Math.min(width, 100 - left)}%"></span></span>
+      <span class="track"><span class="bar ${cls}" style="left:${left}%;width:${Math.min(width, 100 - left)}%"></span></span>
       <span class="dur">${fmt(x.dur)}</span>
-      <span class="st ${x.status}">${esc(x.status)}</span></div>`;
+      <span class="st ${cls}">${esc(x.status)}</span></div>`;
     return row + (x.flag ? `<div class="row flagged reveal" style="animation-delay:${200 + i*25}ms;padding-top:0"><span class="flag ${flagClass(x.flag)}">↳ ${esc(x.flag)}</span></div>` : "");
   }).join("");
   try { history.replaceState(null, "", "#" + (mode === "today" ? "" : mode + "-") + sku + "-" + id); } catch (e) {}
@@ -185,7 +188,8 @@ function fromHash(){
   let h = location.hash.slice(1);
   if (h.startsWith("fixed-") && DATA.fixed) { mode = "fixed"; h = h.slice(6); }
   else if (h.startsWith("js-") && DATA.js) { mode = "js"; h = h.slice(3); }
-  else if (h.startsWith("codex-") && DATA.codex) { mode = "codex"; h = h.slice(6); } else mode = "today";
+  else if (h.startsWith("codex-") && DATA.codex) { mode = "codex"; h = h.slice(6); }
+  else if (h.startsWith("stdio-") && DATA.stdio) { mode = "stdio"; h = h.slice(6); } else mode = "today";
   const m = h.match(/^(SKU-\d+)-(.+)$/);
   if (m && SKUS.includes(m[1])) { sku = m[1]; h = m[2]; }
   show(DATA.today.some((d) => d.id === h) ? h : "tool_error");

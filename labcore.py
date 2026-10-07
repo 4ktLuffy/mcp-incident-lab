@@ -31,14 +31,20 @@ def join_runs(truth: list[dict], agent: list[dict]) -> list[dict]:
     return out
 
 
-def what_happened(fault: str, truth: dict | None, agent: dict, real_units: int, timeout_ms: int) -> str:
+def what_happened(fault: str, truth: dict | None, agent: dict, real_units: int, timeout_ms: int,
+                  transport: str = "http") -> str:
     if truth is None:
-        return "server never logged the call"
+        # over stdio the server is a child of the agent and dies when the client closes the connection
+        return ("server process ended before the tool finished" if transport == "stdio" and fault == "slow"
+                else "server never logged the call")
     if fault == "tool_error":
         return f"tool returned isError: {(truth.get('returned') or {}).get('text')}"
     if fault == "stale_data":
         got = (truth.get("returned") or {}).get("in_stock")
         return f"tool returned in_stock={got} from a stale cache; real stock is {real_units}; no error raised"
+    if fault == "slow" and truth.get("returned") is None and not truth.get("is_error"):
+        return (f"client gave up after {timeout_ms} ms and closed the connection; the server stopped the call "
+                f"after {truth['duration_ms']:.0f} ms, before it finished")
     if fault == "slow":
         return f"tool took {truth['duration_ms']:.0f} ms; client gave up after {timeout_ms} ms"
     return f"tool returned in_stock={(truth.get('returned') or {}).get('in_stock')}, correct"
@@ -56,6 +62,7 @@ def summarize_spans(rows: list[dict], error_events: int = 0) -> dict:
     py = next((r for r in rows if r.get("span.op") == "mcp.server"
                and str(r.get("span.description") or "").startswith("tools/call")), None)
     js = next((r for r in rows if r.get("span.op") == "gen_ai.execute_tool"), None)
+    separate = bool(py and py.get("separate_trace"))
     bad = [r for r in rows if r.get("span.status") not in OK_STATUSES]
     # http.client spans marked error although nothing failed: a 2xx response whose stream the client
     # closed, or a request the client aborted on close() before any response (no status code at all).
@@ -64,7 +71,9 @@ def summarize_spans(rows: list[dict], error_events: int = 0) -> dict:
     sdk_bad = [r for r in bad if r not in noise and r is not js]
     return {
         "spans": len(rows),
-        "joined": py is not None and js is not None,
+        # joined: both spans are in the agent's trace. A span found only by run id is in a separate trace.
+        "joined": py is not None and js is not None and not separate,
+        "separate_trace": separate,
         "py_span_found": py is not None,
         "py_status": py.get("span.status") if py else None,
         "py_duration_ms": py.get("span.duration") if py else None,
@@ -103,7 +112,7 @@ def truth_failed(truth: dict | None, agent: dict) -> bool:
 
 
 def build_report(joined: list[dict], sentry_by_run: dict | None, real_units: dict[str, int] | int,
-                 timeout_ms: int) -> list[dict]:
+                 timeout_ms: int, transport: str = "http") -> list[dict]:
     rows = []
     for j in joined:
         a, t = j["agent"], j["truth"]
@@ -112,7 +121,7 @@ def build_report(joined: list[dict], sentry_by_run: dict | None, real_units: dic
         units = real_units.get(sku, 0) if isinstance(real_units, dict) else real_units
         rows.append({
             "scenario": j["fault"], "title": TITLES.get(j["fault"], j["fault"]), "run_id": j["run_id"],
-            "trace_id": a.get("trace_id"), "what_happened": what_happened(j["fault"], t, a, units, timeout_ms),
+            "trace_id": a.get("trace_id"), "what_happened": what_happened(j["fault"], t, a, units, timeout_ms, transport),
             "agent_answer": a["final_answer"], "correct_answer": a["correct_answer"],
             "answer_correct": a["answer_correct"], "propagated_header_matches": j["propagated"],
             "truth": t, "sentry": s, "sku": sku,
@@ -127,7 +136,8 @@ def build_report(joined: list[dict], sentry_by_run: dict | None, real_units: dic
 def sentry_cell(s: dict | None) -> str:
     if s is None:
         return "not read back"
-    py = (f"MCP tool span {s['py_status'] or 'ok'} ({s['py_duration_ms']:.0f} ms)" if s["py_span_found"]
+    where = " in a separate trace" if s.get("separate_trace") else ""
+    py = (f"MCP tool span{where} {s['py_status'] or 'ok'} ({s['py_duration_ms']:.0f} ms)" if s["py_span_found"]
           else "MCP tool span missing")
     parts = [py, f"agent-marked span {s['js_tool_status'] or 'none'}", f"false HTTP errors {s['false_http_errors']}"]
     if s["error_spans"] or s["error_events"]:

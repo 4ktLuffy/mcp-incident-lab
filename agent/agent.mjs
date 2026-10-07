@@ -5,6 +5,7 @@ const Sentry = await import(process.env.LAB_SENTRY_NODE || "@sentry/node");
 import OpenAI from "openai";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +18,7 @@ const runId = arg("run-id", "run-" + Date.now());
 const fault = arg("fault", "none");
 const sku = arg("sku", "SKU-1001");
 const mcpUrl = arg("mcp-url", "http://127.0.0.1:8765/mcp");
+const transport = arg("transport", "http");  // http, or stdio: spawn the Python server as a child process
 const timeoutMs = Number(arg("timeout-ms", "2000"));
 const runsDir = resolve(arg("runs-dir", resolve(here, "../runs")));
 const useCodex = arg("model", "scripted") === "codex";
@@ -50,8 +52,17 @@ async function callTool(args) {
     if (td["sentry-trace"]) headers["sentry-trace"] = td["sentry-trace"];
     if (td.baggage) headers["baggage"] = td.baggage;
     const client = new Client({ name: "inventory-bot", version: "1.0.0" });
+    let tr;
+    if (transport === "stdio") {
+      // No headers over stdio: the server reads fault and run id from env, and no trace context crosses.
+      const env = { ...process.env, LAB_FAULT: fault, LAB_RUN_ID: runId, LAB_RUNS_DIR: runsDir };
+      tr = new StdioClientTransport({ command: resolve(here, "../.venv/bin/python"), args: ["-m", "server.server", "--stdio"],
+        cwd: resolve(here, ".."), env, stderr: "ignore" });
+    } else {
+      tr = new StreamableHTTPClientTransport(new URL(mcpUrl), { requestInit: { headers } });
+    }
     try {
-      await client.connect(new StreamableHTTPClientTransport(new URL(mcpUrl), { requestInit: { headers } }));
+      await client.connect(tr);
       const r = await client.callTool({ name: "check_inventory", arguments: args }, undefined, { timeout: timeoutMs });
       const text = (r.content || []).map((c) => c.text ?? "").join(" ");
       if (r.isError) span.setStatus({ code: 2, message: "tool returned isError" });
@@ -60,7 +71,8 @@ async function callTool(args) {
       span.setStatus({ code: 2, message: "tool call threw" });
       return { text: "", isError: true, threw: String(e.message || e) };
     } finally {
-      client.close().catch(() => {});
+      const closed = client.close().catch(() => {});
+      if (transport === "stdio") await closed;  // closing stdin is what tells the child to flush and exit
     }
   });
 }

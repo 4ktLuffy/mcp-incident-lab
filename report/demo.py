@@ -17,6 +17,13 @@ ROOT = Path(__file__).resolve().parent.parent
 RUNS = ROOT / "runs"
 JS_SERVER = "mcp-incident-lab-js-server"  # release set by agent/mcp_server.mjs
 
+STDIO_NOTES = {
+    "none": "Over stdio the tool's span lands in its own trace. Sentry's Python MCP integration doesn't read trace context from the MCP request (a known gap, getsentry/sentry-python#5205), so nothing links it to the agent.",
+    "tool_error": "The tool's span is in a separate trace, and its status is unknown, not error (getsentry/sentry-python#7890).",
+    "stale_data": "The tool's span is in a separate trace, and nothing in it shows the data was stale.",
+    "slow": "Over stdio the client's close cancels the tool on the server, and that span is recorded as internal_error. So the slow call is visible here, but in a trace nothing links to the agent.",
+}
+
 CODEX_NOTES = {
     "healthy": "A real model (gpt-5.6-sol through the Codex CLI) answers correctly.",
     "tool_error": "The real model retried, then told the user it couldn't check. An honest answer, but in Sentry every failed tool call is still recorded as ok (getsentry/sentry-python#7890).",
@@ -59,7 +66,9 @@ CONTROL_ZERO = ("Control: {sku} really has 0 in stock and the agent says so. The
                 "result; it isn't hardcoded to say out of stock.")
 
 
-def note_for(s: dict, units: int, fixed: bool, js: bool = False, codex: bool = False) -> str:
+def note_for(s: dict, units: int, fixed: bool, js: bool = False, codex: bool = False, stdio: bool = False) -> str:
+    if stdio and s["verdict"] != "lucky" and not (s["scenario"] == "none" and units == 0):
+        return STDIO_NOTES[s["scenario"]]
     if codex and s["verdict"] != "lucky" and not (s["scenario"] == "none" and units == 0):
         return CODEX_NOTES["healthy" if s["scenario"] == "none" else s["scenario"]]
     if s["verdict"] == "lucky":
@@ -77,7 +86,9 @@ def spans_for(rows: list[dict], scenario: dict, fixed: bool = False, js: bool = 
             continue  # the scripted model's server, not part of the system under test
         code = r.get("http.response.status_code")
         flag = None
-        if r["span.op"] == "http.client" and r["span.status"] == "error" and code and 200 <= code < 300:
+        if r.get("separate_trace") and r["span.op"] == "mcp.server":
+            flag = f"in a separate trace: nothing links it to the agent (status {r['span.status']})"
+        elif r["span.op"] == "http.client" and r["span.status"] == "error" and code and 200 <= code < 300:
             flag = "false alarm: HTTP 200, the client closed the stream"
         elif r["span.op"] == "http.client" and r["span.status"] == "error":
             flag = "false alarm: no response yet, the client closed the request (the MCP cancel notice)"
@@ -109,7 +120,7 @@ def spans_for(rows: list[dict], scenario: dict, fixed: bool = False, js: bool = 
     return out
 
 
-def load(runs: Path, fixed: bool, js: bool = False, codex: bool = False) -> list[dict]:
+def load(runs: Path, fixed: bool, js: bool = False, codex: bool = False, stdio: bool = False) -> list[dict]:
     calls: dict[str, int] = {}
     for t in map(json.loads, (runs / "truth.jsonl").read_text().splitlines()):
         calls[t["run_id"]] = calls.get(t["run_id"], 0) + 1
@@ -124,7 +135,7 @@ def load(runs: Path, fixed: bool, js: bool = False, codex: bool = False) -> list
         verdict = s["verdict"] if (not fixed or js or s["verdict"] == "lucky") else FIXED_LABELS[s["scenario"]]
         data.append({"id": s["scenario"], "sku": s["sku"], "units": units, "title": s["title"], "verdict": verdict, "correct": s["answer_correct"],
                      "answer": s["agent_answer"], "truth": s["what_happened"], "returned": t.get("returned"), "seen": seen.get(s["run_id"], {}),
-                     "note": note_for(s, units, fixed, js, codex), "kind": s.get("answer_kind") or ("right" if s["answer_correct"] else "wrong"),
+                     "note": note_for(s, units, fixed, js, codex, stdio), "kind": s.get("answer_kind") or ("right" if s["answer_correct"] else "wrong"),
                      "model": "gpt-5.6-sol via Codex CLI" if codex else "scripted model", "calls": calls.get(s["run_id"], 0),
                      "spans": spans_for(raw[f'{s["sku"]}/{s["scenario"]}'], s, fixed, js)})
     return data
@@ -136,6 +147,8 @@ def main() -> None:
         data["fixed"] = load(ROOT / "runs-fixed", True)
     if (ROOT / "runs-js/spans_raw.json").exists():
         data["js"] = load(ROOT / "runs-js", False, js=True)
+    if (ROOT / "runs-stdio/spans_raw.json").exists():
+        data["stdio"] = load(ROOT / "runs-stdio", False, stdio=True)
     if (ROOT / "runs-codex/spans_raw.json").exists():
         data["codex"] = load(ROOT / "runs-codex", False, codex=True)
     html = (ROOT / "report/demo_template.html").read_text().replace("/*DATA*/null", json.dumps(data))

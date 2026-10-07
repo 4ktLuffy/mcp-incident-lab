@@ -3,12 +3,16 @@
 Fault mode is chosen per request from the `x-lab-fault` header (read through the
 MCP request context, `Context.headers`). Ground truth for every tool call is
 appended to runs/truth.jsonl by this file, outside the Sentry SDK.
+
+With `--stdio` there are no headers: the process is started per agent run and the fault and
+run id come from the env vars LAB_FAULT and LAB_RUN_ID.
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -74,25 +78,33 @@ async def run_check(sku: str, fault: str | None, run_id: str | None,
         })
 
 
-def build_app():
-    """Create the Sentry-instrumented app. Sentry must be initialised before this runs."""
+def build_server(stdio: bool = False) -> MCPServer:
+    """Create the MCP server. Sentry must be initialised before this runs."""
     mcp = MCPServer("inventory")
 
     @mcp.tool()
     async def check_inventory(sku: str, ctx: Context) -> CallToolResult:
         """Look up units in stock for a SKU."""
-        h = ctx.headers or {}
-        fault = h.get("x-lab-fault") or None
+        if stdio:
+            # no headers over stdio: the trace the server can see is whatever its own span is in
+            import sentry_sdk
+            fault, run_id, trace = os.environ.get("LAB_FAULT") or None, os.environ.get("LAB_RUN_ID"), sentry_sdk.get_traceparent()
+        else:
+            h = ctx.headers or {}
+            fault, run_id, trace = h.get("x-lab-fault") or None, h.get("x-lab-run-id"), h.get("sentry-trace")
         if fault not in FAULTS:
             fault = None
-        payload, is_error, err = await run_check(
-            sku, fault, h.get("x-lab-run-id"), h.get("sentry-trace"))
+        payload, is_error, err = await run_check(sku, fault, run_id, trace)
         if is_error:
             return CallToolResult(content=[TextContent(type="text", text=err)], is_error=True)
         return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload))],
                               structured_content=payload)
 
-    return mcp.streamable_http_app()
+    return mcp
+
+
+def build_app():
+    return build_server().streamable_http_app()
 
 
 def main() -> None:
@@ -105,6 +117,15 @@ def main() -> None:
     sentry_sdk.init(dsn=os.environ.get("SENTRY_DSN_PY") or None, traces_sample_rate=1.0,
                     send_default_pii=bool(os.environ.get("LAB_PY_RECORD_OUTPUTS")),
                     integrations=[MCPIntegration()], **extra)
+    if "--stdio" in sys.argv:
+        # Lab instrumentation, not something a normal server would do: over stdio the Python spans are
+        # in a different trace from the agent's, so tag them with the run id to find them again.
+        sentry_sdk.set_tag("lab.run_id", os.environ.get("LAB_RUN_ID"))
+        try:
+            build_server(stdio=True).run("stdio")  # returns when the client closes stdin
+        finally:
+            sentry_sdk.flush(5)
+        return
     uvicorn.run(build_app(), host="127.0.0.1", port=int(os.environ.get("LAB_PORT", "8765")),
                 log_level="warning")
 
