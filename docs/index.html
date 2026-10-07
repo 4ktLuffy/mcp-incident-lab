@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP Incident Lab</title>
+<style>
+:root{
+  --bg:#f6f5f8;--panel:#ffffff;--ink:#1c1a24;--muted:#625d70;--line:#e3e0ea;--soft:#efedf3;
+  --accent:#6a4fd1;--ok:#1f8a5b;--okbg:#e5f4ec;--bad:#c4332f;--badbg:#fbe8e7;--warn:#a86a00;--warnbg:#fbf0dc;
+  --js:#6a4fd1;--py:#2f6fb5;--ghost:#9c97a8;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#14121a;--panel:#1c1a24;--ink:#ece9f3;--muted:#a49fb2;--line:#2e2b38;--soft:#24212d;
+  --accent:#a48ff0;--ok:#5ccb95;--okbg:#173327;--bad:#ff7b72;--badbg:#3a1d1c;--warn:#f0b45a;--warnbg:#3a2c14;
+  --js:#a48ff0;--py:#6aa8ec;--ghost:#6f6a7c;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#14121a;--panel:#1c1a24;--ink:#ece9f3;--muted:#a49fb2;--line:#2e2b38;--soft:#24212d;
+  --accent:#a48ff0;--ok:#5ccb95;--okbg:#173327;--bad:#ff7b72;--badbg:#3a1d1c;--warn:#f0b45a;--warnbg:#3a2c14;
+  --js:#a48ff0;--py:#6aa8ec;--ghost:#6f6a7c;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--sans)}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:16px;padding-block:28px 48px;display:grid;gap:20px}
+h1{font-size:28px;line-height:1.15;margin:0;text-wrap:balance;letter-spacing:-.01em}
+.lede{margin:6px 0 0;color:var(--muted);max-width:68ch}
+.lede b{color:var(--ink)}
+.picker{display:flex;flex-wrap:wrap;gap:8px}
+.picker button{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  padding:9px 14px;border-radius:8px;cursor:pointer}
+.picker button small{display:block;font-weight:500;color:var(--muted);font-size:12px}
+.picker button[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.grid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,8fr);gap:20px;align-items:start}
+@media (max-width:860px){.grid{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;min-width:0}
+.label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 12px;font-weight:700}
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.step{display:grid;gap:3px}
+.who{font-size:12px;color:var(--muted);font-weight:600}
+.bubble{padding:9px 12px;border-radius:8px;background:var(--soft);overflow-wrap:anywhere}
+.bubble code,.mono{font-family:var(--mono);font-size:13px}
+.answer{font-weight:600}
+.badge{display:inline-block;font-size:12px;font-weight:700;padding:1px 8px;border-radius:99px;margin-left:6px;vertical-align:1px}
+.right{background:var(--okbg);color:var(--ok)}.wrong{background:var(--badbg);color:var(--bad)}
+.truth{border-left:3px solid var(--line);padding-left:10px;color:var(--muted);font-size:13px}
+.verdict{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;padding:14px 18px;border-radius:10px;border:1px solid var(--line);background:var(--panel)}
+.verdict strong{font-size:20px;text-transform:capitalize}
+.verdict p{margin:0;max-width:80ch;color:var(--muted)}
+.v-healthy{color:var(--ok)}.v-visible{color:var(--warn)}.v-misleading,.v-invisible,.v-missing{color:var(--bad)}
+.trace{overflow-x:auto}
+.rows{min-width:640px;display:grid;gap:2px}
+.row{display:grid;grid-template-columns:34px minmax(220px,2.2fr) minmax(120px,1fr) 64px 58px;gap:8px;align-items:center;font-size:13px;padding:3px 4px;border-radius:5px}
+.row.flagged{background:var(--soft)}
+.side{font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;text-align:center;color:var(--panel)}
+.side.js{background:var(--js)}.side.py{background:var(--py)}
+.op{font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.op span{color:var(--muted)}
+.track{position:relative;height:12px;background:var(--soft);border-radius:3px}
+.bar{position:absolute;top:0;bottom:0;border-radius:3px;min-width:2px}
+.bar.ok{background:var(--ok)}.bar.error{background:var(--bad)}
+.bar.missing{background:transparent;border:1.5px dashed var(--ghost)}
+.dur{font-family:var(--mono);text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+.st{font-size:12px;font-weight:700;text-align:right}
+.st.ok{color:var(--ok)}.st.error{color:var(--bad)}.st.missing{color:var(--ghost)}
+.flag{grid-column:2 / -1;font-size:12px;font-weight:600;margin:-2px 0 4px}
+.flag.false{color:var(--warn)}.flag.hand{color:var(--muted)}.flag.lie,.flag.gone{color:var(--bad)}.flag.real{color:var(--muted)}
+.row.ghost .op{color:var(--ghost)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--muted);margin-top:12px}
+.foot{font-size:13px;color:var(--muted);display:grid;gap:6px;max-width:90ch}
+.foot a{color:var(--accent)}
+.reveal{animation:in .35s ease both}
+@keyframes in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.reveal{animation:none}}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <h1>MCP Incident Lab</h1>
+    <p class="lede">An inventory agent (Node, <span class="mono">@sentry/node</span>) asks an MCP tool (Python, <span class="mono">sentry-sdk</span> with <span class="mono">MCPIntegration</span>) whether <b>SKU-1001</b> is in stock. It is: <b>42 units</b>. Break the tool and compare what the agent said, what really happened, and what Sentry recorded.</p>
+  </header>
+
+  <nav class="picker" aria-label="Scenario" id="picker"></nav>
+
+  <div class="verdict" id="verdict" aria-live="polite"></div>
+
+  <div class="grid">
+    <section class="panel">
+      <h2 class="label">What really happened</h2>
+      <ol class="steps" id="steps"></ol>
+    </section>
+    <section class="panel">
+      <h2 class="label">What Sentry recorded (spans read back from Sentry)</h2>
+      <div class="trace"><div class="rows" id="rows"></div></div>
+      <div class="legend"><span><span class="side js">JS</span> agent</span><span><span class="side py">PY</span> MCP server</span><span>dashed bar: span that never arrived</span></div>
+    </section>
+  </div>
+
+  <footer class="foot">
+    <p>This page replays one real run. Both SDKs are the real ones (sentry-sdk 2.71.0, @sentry/node 11.4.0, mcp 2.3.0) and every span above was read back from Sentry's API. The model is scripted, so it is not an LLM, but it answers the way agents commonly do when a tool fails: confidently. Ground truth comes from the server's own log, not from Sentry.</p>
+    <p>Reported: <a href="https://github.com/getsentry/sentry-python/issues/7890">sentry-python#7890</a> (tool error recorded as ok), <a href="https://github.com/getsentry/sentry-python/issues/7916">sentry-python#7916</a> (slow tool spans lost). Code and repros: <a href="https://github.com/4ktLuffy/mcp-incident-lab">4ktLuffy/mcp-incident-lab</a>.</p>
+  </footer>
+</main>
+<script>
+const DATA = [{"id": "none", "title": "Healthy control", "verdict": "healthy", "correct": true, "answer": "SKU SKU-1001 is in stock (42 units).", "truth": "tool returned in_stock=42, correct", "returned": {"sku": "SKU-1001", "in_stock": 42, "warehouse": "WH-NORTH"}, "seen": {"text": "{\"sku\": \"SKU-1001\", \"in_stock\": 42, \"warehouse\": \"WH-NORTH\"}", "isError": false, "threw": null}, "note": "Everything worked. Two HTTP spans are still marked error: the MCP client closed two streams after a 200, which @sentry/node counts as a failure.", "spans": [{"start": 0.0, "dur": 40.2, "op": "gen_ai.invoke_agent", "desc": "invoke_agent inventory-bot", "status": "ok", "side": "JS agent", "flag": null}, {"start": 0.4, "dur": 18.9, "op": "gen_ai.chat", "desc": "chat scripted-model-v1", "status": "ok", "side": "JS agent", "flag": null}, {"start": 4.7, "dur": 13.2, "op": "http.client", "desc": "POST /v1/chat/completions (scripted model)", "status": "ok", "side": "JS agent", "flag": null}, {"start": 19.4, "dur": 18.2, "op": "gen_ai.execute_tool", "desc": "execute_tool check_inventory", "status": "ok", "side": "JS agent", "flag": null}, {"start": 21.9, "dur": 4.4, "op": "http.client", "desc": "POST /mcp", "status": "ok", "side": "JS agent", "flag": null}, {"start": 23.0, "dur": 3.0, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 29.6, "dur": 1.7, "op": "http.client", "desc": "POST /mcp", "status": "ok", "side": "JS agent", "flag": null}, {"start": 30.9, "dur": 0.3, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 31.9, "dur": 4.5, "op": "http.client", "desc": "GET /mcp", "status": "error", "side": "JS agent", "flag": "false alarm: HTTP 200, the client closed the stream"}, {"start": 32.9, "dur": 4.8, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 32.9, "dur": 4.5, "op": "http.client", "desc": "POST /mcp", "status": "error", "side": "JS agent", "flag": "false alarm: HTTP 200, the client closed the stream"}, {"start": 33.8, "dur": 1.5, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 34.3, "dur": 0.6, "op": "mcp.server", "desc": "tools/call check_inventory", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 37.9, "dur": 2.3, "op": "gen_ai.chat", "desc": "chat scripted-model-v1", "status": "ok", "side": "JS agent", "flag": null}, {"start": 38.4, "dur": 1.5, "op": "http.client", "desc": "POST /v1/chat/completions (scripted model)", "status": "ok", "side": "JS agent", "flag": null}]}, {"id": "tool_error", "title": "Tool error", "verdict": "misleading", "correct": false, "answer": "SKU SKU-1001 is out of stock.", "truth": "tool returned isError: warehouse DB timeout", "returned": {"isError": true, "text": "warehouse DB timeout"}, "seen": {"text": "warehouse DB timeout", "isError": true, "threw": null}, "note": "The tool returned isError. Sentry's MCP span says ok. The only red span is the one our agent code marks by hand.", "spans": [{"start": 0.0, "dur": 36.4, "op": "gen_ai.invoke_agent", "desc": "invoke_agent inventory-bot", "status": "ok", "side": "JS agent", "flag": null}, {"start": 0.5, "dur": 16.9, "op": "gen_ai.chat", "desc": "chat scripted-model-v1", "status": "ok", "side": "JS agent", "flag": null}, {"start": 5.1, "dur": 10.6, "op": "http.client", "desc": "POST /v1/chat/completions (scripted model)", "status": "ok", "side": "JS agent", "flag": null}, {"start": 17.5, "dur": 16.1, "op": "gen_ai.execute_tool", "desc": "execute_tool check_inventory", "status": "error", "side": "JS agent", "flag": "marked error by our agent code, not by Sentry"}, {"start": 20.3, "dur": 3.5, "op": "http.client", "desc": "POST /mcp", "status": "ok", "side": "JS agent", "flag": null}, {"start": 21.2, "dur": 1.8, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 26.9, "dur": 1.7, "op": "http.client", "desc": "POST /mcp", "status": "ok", "side": "JS agent", "flag": null}, {"start": 28.2, "dur": 0.3, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 29.3, "dur": 3.1, "op": "http.client", "desc": "GET /mcp", "status": "error", "side": "JS agent", "flag": "false alarm: HTTP 200, the client closed the stream"}, {"start": 29.7, "dur": 3.9, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 29.7, "dur": 3.7, "op": "http.client", "desc": "POST /mcp", "status": "error", "side": "JS agent", "flag": "false alarm: HTTP 200, the client closed the stream"}, {"start": 30.5, "dur": 1.2, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 30.9, "dur": 0.2, "op": "mcp.server", "desc": "tools/call check_inventory", "status": "ok", "side": "Python MCP server", "flag": "ok, although the tool returned isError"}, {"start": 33.8, "dur": 2.5, "op": "gen_ai.chat", "desc": "chat scripted-model-v1", "status": "ok", "side": "JS agent", "flag": null}, {"start": 34.4, "dur": 1.7, "op": "http.client", "desc": "POST /v1/chat/completions (scripted model)", "status": "ok", "side": "JS agent", "flag": null}]}, {"id": "stale_data", "title": "Stale data", "verdict": "invisible", "correct": false, "answer": "SKU SKU-1001 is out of stock.", "truth": "tool returned in_stock=0 from a stale cache; real stock is 42; no error raised", "returned": {"sku": "SKU-1001", "in_stock": 0, "warehouse": "WH-NORTH"}, "seen": {"text": "{\"sku\": \"SKU-1001\", \"in_stock\": 0, \"warehouse\": \"WH-NORTH\"}", "isError": false, "threw": null}, "note": "The tool returned old data without any error. The agent's answer is wrong and every span Sentry recorded is ok.", "spans": [{"start": 0.0, "dur": 38.6, "op": "gen_ai.invoke_agent", "desc": "invoke_agent inventory-bot", "status": "ok", "side": "JS agent", "flag": null}, {"start": 0.4, "dur": 19.9, "op": "gen_ai.chat", "desc": "chat scripted-model-v1", "status": "ok", "side": "JS agent", "flag": null}, {"start": 4.8, "dur": 14.1, "op": "http.client", "desc": "POST /v1/chat/completions (scripted model)", "status": "ok", "side": "JS agent", "flag": null}, {"start": 20.5, "dur": 15.3, "op": "gen_ai.execute_tool", "desc": "execute_tool check_inventory", "status": "ok", "side": "JS agent", "flag": null}, {"start": 23.1, "dur": 3.5, "op": "http.client", "desc": "POST /mcp", "status": "ok", "side": "JS agent", "flag": null}, {"start": 24.1, "dur": 1.6, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 29.4, "dur": 1.5, "op": "http.client", "desc": "POST /mcp", "status": "ok", "side": "JS agent", "flag": null}, {"start": 30.5, "dur": 0.2, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 31.5, "dur": 3.1, "op": "http.client", "desc": "GET /mcp", "status": "error", "side": "JS agent", "flag": "false alarm: HTTP 200, the client closed the stream"}, {"start": 31.7, "dur": 4.0, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 31.9, "dur": 3.7, "op": "http.client", "desc": "POST /mcp", "status": "error", "side": "JS agent", "flag": "false alarm: HTTP 200, the client closed the stream"}, {"start": 32.3, "dur": 1.2, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 32.8, "dur": 0.3, "op": "mcp.server", "desc": "tools/call check_inventory", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 36.0, "dur": 2.6, "op": "gen_ai.chat", "desc": "chat scripted-model-v1", "status": "ok", "side": "JS agent", "flag": null}, {"start": 36.6, "dur": 1.7, "op": "http.client", "desc": "POST /v1/chat/completions (scripted model)", "status": "ok", "side": "JS agent", "flag": null}]}, {"id": "slow", "title": "Slow tool", "verdict": "visible", "correct": false, "answer": "SKU SKU-1001 is out of stock.", "truth": "tool took 6002 ms; client gave up after 2000 ms", "returned": {"sku": "SKU-1001", "in_stock": 42, "warehouse": "WH-NORTH"}, "seen": {"text": "", "isError": true, "threw": "MCP error -32001: Request timed out"}, "note": "Visible only as the agent's timeout. The tool ran for 6 seconds and its span never reached Sentry; the server request is marked ok.", "spans": [{"start": 0.0, "dur": 2034.4, "op": "gen_ai.invoke_agent", "desc": "invoke_agent inventory-bot", "status": "ok", "side": "JS agent", "flag": null}, {"start": 0.4, "dur": 17.6, "op": "gen_ai.chat", "desc": "chat scripted-model-v1", "status": "ok", "side": "JS agent", "flag": null}, {"start": 4.8, "dur": 11.8, "op": "http.client", "desc": "POST /v1/chat/completions (scripted model)", "status": "ok", "side": "JS agent", "flag": null}, {"start": 18.1, "dur": 2013.1, "op": "gen_ai.execute_tool", "desc": "execute_tool check_inventory", "status": "error", "side": "JS agent", "flag": "marked error by our agent code, not by Sentry"}, {"start": 20.7, "dur": 3.0, "op": "http.client", "desc": "POST /mcp", "status": "ok", "side": "JS agent", "flag": null}, {"start": 21.6, "dur": 1.5, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 26.6, "dur": 1.5, "op": "http.client", "desc": "POST /mcp", "status": "ok", "side": "JS agent", "flag": null}, {"start": 27.8, "dur": 0.3, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": null}, {"start": 28.8, "dur": 2001.0, "op": "http.client", "desc": "GET /mcp", "status": "error", "side": "JS agent", "flag": "false alarm: HTTP 200, the client closed the stream"}, {"start": 29.1, "dur": 2002.1, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": "ok, although the client had already given up"}, {"start": 29.2, "dur": 2001.7, "op": "http.client", "desc": "POST /mcp", "status": "error", "side": "JS agent", "flag": "false alarm: HTTP 200, the client closed the stream"}, {"start": 30.1, "dur": 2002.0, "op": "http.server", "desc": "/mcp", "status": "ok", "side": "Python MCP server", "flag": "ok, although the client had already given up"}, {"start": 30.1, "dur": 6002.1, "op": "mcp.server", "desc": "tools/call check_inventory", "status": "missing", "side": "Python MCP server", "flag": "never reached Sentry (the tool really ran 6,002 ms)", "ghost": true}, {"start": 2029.2, "dur": 1.9, "op": "http.client", "desc": "POST /mcp", "status": "error", "side": "JS agent", "flag": "real: the request timed out"}, {"start": 2031.5, "dur": 2.8, "op": "gen_ai.chat", "desc": "chat scripted-model-v1", "status": "ok", "side": "JS agent", "flag": null}, {"start": 2032.2, "dur": 1.9, "op": "http.client", "desc": "POST /v1/chat/completions (scripted model)", "status": "ok", "side": "JS agent", "flag": null}]}];
+const SUB = {none:"control", tool_error:"break it", stale_data:"break it", slow:"break it"};
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = (ms) => ms >= 1000 ? (ms/1000).toFixed(2) + " s" : Math.round(ms) + " ms";
+
+function flagClass(f){
+  if (f.startsWith("false alarm")) return "false";
+  if (f.startsWith("marked error by our agent")) return "hand";
+  if (f.startsWith("never reached")) return "gone";
+  if (f.startsWith("real")) return "real";
+  return "lie";
+}
+
+function show(id){
+  const s = DATA.find((d) => d.id === id);
+  for (const b of $("picker").children) b.setAttribute("aria-pressed", String(b.dataset.id === id));
+  $("verdict").innerHTML = `<strong class="v-${s.verdict} reveal">${esc(s.verdict)}</strong><p class="reveal">${esc(s.note)}</p>`;
+  const toolSeen = s.seen.threw ? `<code>${esc(s.seen.threw)}</code> (client timeout 2 s)`
+    : s.seen.isError ? `<code>isError: true</code> "${esc(s.seen.text)}"` : `<code>${esc(s.seen.text)}</code>`;
+  $("steps").innerHTML = [
+    ["User", "Is SKU-1001 in stock?"],
+    ["Agent (scripted model)", "calls <code>check_inventory({\"sku\": \"SKU-1001\"})</code>"],
+    ["Tool result the agent saw", toolSeen],
+    ["Agent answer", `<span class="answer">${esc(s.answer)}</span><span class="badge ${s.correct ? "right" : "wrong"}">${s.correct ? "right" : "wrong"}</span>`],
+  ].map(([w, b], i) => `<li class="step reveal" style="animation-delay:${i*120}ms"><span class="who">${w}</span><div class="bubble">${b}</div></li>`).join("")
+    + `<li class="step reveal" style="animation-delay:480ms"><div class="truth">Server log: ${esc(s.truth)}</div></li>`;
+  const end = Math.max(...s.spans.map((x) => x.start + x.dur));
+  $("rows").innerHTML = s.spans.map((x, i) => {
+    const left = (x.start / end) * 100, width = Math.max((x.dur / end) * 100, 0.4);
+    const row = `<div class="row ${x.flag ? "flagged" : ""} ${x.ghost ? "ghost" : ""} reveal" style="animation-delay:${200 + i*25}ms">
+      <span class="side ${x.side.startsWith("JS") ? "js" : "py"}">${x.side.startsWith("JS") ? "JS" : "PY"}</span>
+      <span class="op" title="${esc(x.op + " " + x.desc)}">${esc(x.op)} <span>${esc(x.desc)}</span></span>
+      <span class="track"><span class="bar ${x.status}" style="left:${left}%;width:${Math.min(width, 100 - left)}%"></span></span>
+      <span class="dur">${fmt(x.dur)}</span>
+      <span class="st ${x.status}">${esc(x.status)}</span></div>`;
+    return row + (x.flag ? `<div class="row flagged reveal" style="animation-delay:${200 + i*25}ms;padding-top:0"><span class="flag ${flagClass(x.flag)}">↳ ${esc(x.flag)}</span></div>` : "");
+  }).join("");
+  try { history.replaceState(null, "", "#" + id); } catch (e) {}
+}
+
+$("picker").innerHTML = DATA.map((d) => `<button type="button" data-id="${d.id}" aria-pressed="false">${esc(d.title)}<small>${SUB[d.id]}</small></button>`).join("");
+$("picker").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) show(b.dataset.id); });
+window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (DATA.some((d) => d.id === h)) show(h); });
+const start = location.hash.slice(1);
+show(DATA.some((d) => d.id === start) ? start : "tool_error");
+</script>
+</body>
+</html>

@@ -19,16 +19,16 @@ code{font-size:.85em}footer{color:var(--mute);font-size:.85rem;margin-top:24px}
 <dt>What happened</dt><dd>tool returned in_stock=42, correct <small>(server truth log)</small></dd>
 <dt>Agent said</dt><dd>SKU SKU-1001 is in stock (42 units). <span class="yes">correct</span> (real: SKU SKU-1001 is in stock)</dd>
 <dt>Sentry showed</dt><dd>MCP tool span ok (1 ms), agent-marked span ok, false HTTP errors 2<br><small>other error spans: none</small></dd>
-<dt>Trace</dt><dd><code>aeca60d6b246469981afd692b3314d83</code>, header reached server: yes</dd></dl></section><section class="row"><h2><span>Tool error</span><span class="v misleading">misleading</span></h2><dl>
+<dt>Trace</dt><dd><code>7c7fd8b5aef04d9596341913114b80a2</code>, header reached server: yes</dd></dl></section><section class="row"><h2><span>Tool error</span><span class="v misleading">misleading</span></h2><dl>
 <dt>What happened</dt><dd>tool returned isError: warehouse DB timeout <small>(server truth log)</small></dd>
 <dt>Agent said</dt><dd>SKU SKU-1001 is out of stock. <span class="no">wrong</span> (real: SKU SKU-1001 is in stock)</dd>
 <dt>Sentry showed</dt><dd>MCP tool span ok (0 ms), agent-marked span error, false HTTP errors 2<br><small>other error spans: none</small></dd>
-<dt>Trace</dt><dd><code>97b15512ed87438fb3bd4628ca0158ac</code>, header reached server: yes</dd></dl></section><section class="row"><h2><span>Stale data</span><span class="v invisible">invisible</span></h2><dl>
+<dt>Trace</dt><dd><code>9b1e9191131f465a96c491ca71b12104</code>, header reached server: yes</dd></dl></section><section class="row"><h2><span>Stale data</span><span class="v invisible">invisible</span></h2><dl>
 <dt>What happened</dt><dd>tool returned in_stock=0 from a stale cache; real stock is 42; no error raised <small>(server truth log)</small></dd>
 <dt>Agent said</dt><dd>SKU SKU-1001 is out of stock. <span class="no">wrong</span> (real: SKU SKU-1001 is in stock)</dd>
 <dt>Sentry showed</dt><dd>MCP tool span ok (0 ms), agent-marked span ok, false HTTP errors 2<br><small>other error spans: none</small></dd>
-<dt>Trace</dt><dd><code>28395d8f462340f3a0b09bf7be590f4b</code>, header reached server: yes</dd></dl></section><section class="row"><h2><span>Slow tool</span><span class="v visible">visible</span></h2><dl>
-<dt>What happened</dt><dd>tool took 6001 ms; client gave up after 2000 ms <small>(server truth log)</small></dd>
+<dt>Trace</dt><dd><code>733cd0a811a044c994a458bdb18943a7</code>, header reached server: yes</dd></dl></section><section class="row"><h2><span>Slow tool</span><span class="v visible">visible</span></h2><dl>
+<dt>What happened</dt><dd>tool took 6002 ms; client gave up after 2000 ms <small>(server truth log)</small></dd>
 <dt>Agent said</dt><dd>SKU SKU-1001 is out of stock. <span class="no">wrong</span> (real: SKU SKU-1001 is in stock)</dd>
 <dt>Sentry showed</dt><dd>MCP tool span missing, agent-marked span error, false HTTP errors 2, other errors 1<br><small>other error spans: http.client:error</small></dd>
-<dt>Trace</dt><dd><code>7088a2b6dcd5407fa5a5369bbbd29366</code>, header reached server: yes</dd></dl></section><footer>Ground truth comes from the server's own log, written outside the Sentry SDK.</footer></main></body></html>
+<dt>Trace</dt><dd><code>c824a6d5c73a49ec99e84a20cae79234</code>, header reached server: yes</dd></dl></section><footer>Ground truth comes from the server's own log, written outside the Sentry SDK.</footer></main></body></html>

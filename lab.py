@@ -58,7 +58,7 @@ def api_get(path: str, params: list[tuple[str, str]]) -> dict:
 
 
 FIELDS = ["id", "span.op", "span.description", "span.status", "span.duration", "is_transaction",
-          "http.response.status_code", "project.name"]
+          "http.response.status_code", "project.name", "precise.start_ts"]
 
 
 def fetch_trace(trace_id: str) -> tuple[list[dict], int]:
@@ -82,7 +82,7 @@ def readback(runs: list[dict], wait: int, tries: int = 8) -> dict:
         sys.exit(f"--readback needs env vars: {', '.join(missing)}")
     print(f"waiting {wait}s for Sentry ingestion...", flush=True)
     time.sleep(wait)
-    out = {}
+    out, raw = {}, {}
     for r in runs:
         tid = r["agent"]["trace_id"]
         summary = None
@@ -93,6 +93,8 @@ def readback(runs: list[dict], wait: int, tries: int = 8) -> dict:
                 break
             time.sleep(15)
         out[r["run_id"]] = summary
+        raw[r["fault"]] = rows
+    (RUNS / "spans_raw.json").write_text(json.dumps(raw, indent=1))  # every span, for report/demo.py
     return out
 
 

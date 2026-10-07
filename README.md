@@ -2,6 +2,10 @@
 
 A small lab that shows how a broken MCP tool turns into a confident wrong answer from an agent, and what Sentry does and doesn't show about it.
 
+![A healthy run, then the tool broken three ways: what the agent said, what really happened, and what Sentry recorded](docs/demo.gif)
+
+Click through it yourself: [the demo page](https://4ktluffy.github.io/mcp-incident-lab/) replays one real run, using spans read back from Sentry (`docs/index.html`, built by `report/demo.py`).
+
 An inventory agent asks an MCP server whether a SKU is in stock. The SKU really is in stock (42 units). We break the tool in three ways and keep our own log of what the server actually did, written by the server code and not by the Sentry SDK. Then we compare that log with the answer the agent gave and with what Sentry recorded.
 
 ## The four scenarios
@@ -34,6 +38,26 @@ Three things we checked with controls:
 2. **The slow tool's span is dropped.** The client gives up at 2 s and the HTTP request on the server closes as ok at 2 s. The tool keeps running for 6 s and its `mcp.server` span never reaches Sentry, even when the server is left running 20 s longer and stopped gracefully. Control: with a 10 s client timeout the same 6 s call shows up (`mcp.server`, 6,002 ms). So the slowest tool calls are the ones you can't see.
 3. **Healthy runs have two error spans.** @sentry/node marks a fetch span as error when the server answered 200 but the client closed the streamed body early. The MCP client does that on every normal session (the GET event stream and a streamed POST). `agent/exp_abort_status.mjs` reproduces it without MCP: a 200 response read fully is ok; the same 200 response cancelled mid-stream is error, both with `reader.cancel()` and with `AbortController`. Nothing leaves the machine.
 
+## Reported
+
+- Tool error recorded as ok: [getsentry/sentry-python#7890](https://github.com/getsentry/sentry-python/issues/7890)
+- Slow tool spans lost when the client times out: [getsentry/sentry-python#7916](https://github.com/getsentry/sentry-python/issues/7916)
+- 2xx fetch spans marked error when the body is cancelled: fix being prepared for getsentry/sentry-javascript
+
+## Experiments
+
+Small scripts that pin down each cause, with a control. None of them send anything to Sentry.
+
+| File | Shows |
+|---|---|
+| `experiments/issue_py_repro.py 1` / `10` | The Python repro from #7916: tool span missing with a 1 s client timeout, present with 10 s |
+| `experiments/mcp_disconnect_inproc.py 1 [static\|stream]` | Same with the lab's own server; `stream` (span streaming) delivers the span |
+| `experiments/orphan_span_repro.py static\|stream disconnect\|wait` | The same drop without MCP, on a plain ASGI app |
+| `agent/exp_abort_status.mjs` | A 200 fetch read fully is ok; cancelled mid-stream it is error |
+| `agent/exp_abort_diag.mjs` | Why: undici sends `request:error` (AbortError) instead of `request:trailers` when the body is cancelled |
+| `agent/exp_cancelled_status.mjs` | Sentry's own status mapping treats a `cancelled` span as ok |
+| `agent/exp_abort_http2.mjs` | Unconfirmed lead with `node:http`, not reported |
+
 ## How to run
 
 ```
@@ -41,6 +65,7 @@ Three things we checked with controls:
 .venv/bin/python lab.py --offline-dsn    # same, with a dummy local DSN so trace headers propagate
 .venv/bin/python lab.py --readback       # also pull the traces back from Sentry
 .venv/bin/python report/build.py         # writes report/index.html
+.venv/bin/python report/demo.py          # writes docs/index.html from the last --readback run
 .venv/bin/python -m pytest tests
 ```
 
