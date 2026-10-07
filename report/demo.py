@@ -16,11 +16,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RUNS = ROOT / "runs"
 
+FIXED_LABELS = {"none": "healthy", "tool_error": "misleading", "stale_data": "catchable", "slow": "visible"}
+
+FIXED_NOTES = {
+    "none": "No false alarms: with the @sentry/node fix (getsentry/sentry-javascript#25129) the closed streams are no longer errors.",
+    "tool_error": "Still recorded as ok. This one needs a fix in sentry-python's MCP integration (getsentry/sentry-python#7890), which isn't written yet.",
+    "stale_data": "Now catchable: with tool results recorded, the span shows in_stock: 0 for a SKU that has {units}. A check on the tool output, or a person, can see it.",
+    "slow": "The tool's span arrives (span streaming), with its real duration and the result the agent never got.",
+}
+
 NOTES = {
     "none": "Everything worked. Two HTTP spans are still marked error: the MCP client closed two streams after a 200, which @sentry/node counts as a failure.",
     "tool_error": "The tool returned isError. Sentry's MCP span says ok. The only red span is the one our agent code marks by hand.",
     "stale_data": "The tool returned old data without any error. The agent's answer is wrong and every span Sentry recorded is ok.",
-    "slow": "Visible only as the agent's timeout. The tool ran for 6 seconds and its span never reached Sentry; the server request is marked ok.",
+    "slow": "The tool ran for 6 seconds and its span never reached Sentry. The server request is marked ok, and the only red HTTP spans are requests the client closed itself.",
 }
 
 
@@ -29,7 +38,21 @@ def clean(desc: str | None) -> str:
     return d.replace("/v1/chat/completions", "/v1/chat/completions (scripted model)")
 
 
-def spans_for(rows: list[dict], scenario: dict) -> list[dict]:
+LUCKY = ("The tool broke, but {sku} really has 0 in stock, so the answer happens to be right. A check on the "
+         "agent's answers alone would never notice, yet the trace looks exactly like the in-stock SKUs.")
+CONTROL_ZERO = ("Control: {sku} really has 0 in stock and the agent says so. The scripted model follows the tool "
+                "result; it isn't hardcoded to say out of stock.")
+
+
+def note_for(s: dict, units: int, fixed: bool) -> str:
+    if s["verdict"] == "lucky":
+        return LUCKY.format(sku=s["sku"])
+    if s["scenario"] == "none" and units == 0:
+        return CONTROL_ZERO.format(sku=s["sku"])
+    return (FIXED_NOTES if fixed else NOTES)[s["scenario"]].format(units=units)
+
+
+def spans_for(rows: list[dict], scenario: dict, fixed: bool = False) -> list[dict]:
     t0 = min(r["precise.start_ts"] for r in rows)
     out = []
     for r in sorted(rows, key=lambda r: r["precise.start_ts"]):
@@ -40,9 +63,11 @@ def spans_for(rows: list[dict], scenario: dict) -> list[dict]:
         if r["span.op"] == "http.client" and r["span.status"] == "error" and code and 200 <= code < 300:
             flag = "false alarm: HTTP 200, the client closed the stream"
         elif r["span.op"] == "http.client" and r["span.status"] == "error":
-            flag = "real: the request timed out"
+            flag = "false alarm: no response yet, the client closed the request (the MCP cancel notice)"
         elif r["span.op"] == "mcp.server" and scenario["scenario"] == "tool_error":
-            flag = "ok, although the tool returned isError"
+            flag = "still ok, although the tool returned isError (#7890, not fixed yet)" if fixed else "ok, although the tool returned isError"
+        elif r["span.op"] == "mcp.server" and fixed and r.get("mcp.tool.result.content"):
+            flag = f"tool result recorded: {r['mcp.tool.result.content']}"
         elif r["span.op"] == "gen_ai.execute_tool" and r["span.status"] == "error":
             flag = "marked error by our agent code, not by Sentry"
         elif r["span.op"] == "http.server" and scenario["scenario"] == "slow" and r["span.duration"] > 1000:
@@ -60,16 +85,27 @@ def spans_for(rows: list[dict], scenario: dict) -> list[dict]:
     return out
 
 
-def main() -> None:
-    report = json.loads((RUNS / "report.json").read_text())
-    raw = json.loads((RUNS / "spans_raw.json").read_text())
-    seen = {a["run_id"]: a.get("tool_result_seen") or {} for a in map(json.loads, (RUNS / "agent.jsonl").read_text().splitlines())}
+def load(runs: Path, fixed: bool) -> list[dict]:
+    report = json.loads((runs / "report.json").read_text())
+    raw = json.loads((runs / "spans_raw.json").read_text())
+    seen = {a["run_id"]: a.get("tool_result_seen") or {} for a in map(json.loads, (runs / "agent.jsonl").read_text().splitlines())}
+    stock = {k: v["in_stock"] for k, v in json.loads((ROOT / "server/inventory.json").read_text()).items()}
     data = []
     for s in report["scenarios"]:
         t = s["truth"] or {}
-        data.append({"id": s["scenario"], "title": s["title"], "verdict": s["verdict"], "correct": s["answer_correct"],
+        units = stock.get(s["sku"], 0)
+        verdict = s["verdict"] if (not fixed or s["verdict"] == "lucky") else FIXED_LABELS[s["scenario"]]
+        data.append({"id": s["scenario"], "sku": s["sku"], "units": units, "title": s["title"], "verdict": verdict, "correct": s["answer_correct"],
                      "answer": s["agent_answer"], "truth": s["what_happened"], "returned": t.get("returned"), "seen": seen.get(s["run_id"], {}),
-                     "note": NOTES[s["scenario"]], "spans": spans_for(raw[s["scenario"]], s)})
+                     "note": note_for(s, units, fixed),
+                     "spans": spans_for(raw[f'{s["sku"]}/{s["scenario"]}'], s, fixed)})
+    return data
+
+
+def main() -> None:
+    data = {"today": load(RUNS, False)}
+    if (ROOT / "runs-fixed/spans_raw.json").exists():
+        data["fixed"] = load(ROOT / "runs-fixed", True)
     html = (ROOT / "report/demo_template.html").read_text().replace("/*DATA*/null", json.dumps(data))
     out = ROOT / "docs/index.html"
     out.parent.mkdir(exist_ok=True)

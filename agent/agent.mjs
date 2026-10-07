@@ -1,5 +1,6 @@
 // Inventory agent. The "model" is SCRIPTED (see fake_llm.mjs), not a real LLM.
-import * as Sentry from "@sentry/node";
+// LAB_SENTRY_NODE points at a locally built @sentry/node (lab.py --with-fixes); default is the installed release.
+const Sentry = await import(process.env.LAB_SENTRY_NODE || "@sentry/node");
 import OpenAI from "openai";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";

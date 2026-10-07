@@ -26,7 +26,11 @@ body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--sans)}
 h1{font-size:28px;line-height:1.15;margin:0;text-wrap:balance;letter-spacing:-.01em}
 .lede{margin:6px 0 0;color:var(--muted);max-width:68ch}
 .lede b{color:var(--ink)}
+.controls{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center}
 .picker{display:flex;flex-wrap:wrap;gap:8px}
+.mode{display:inline-flex;border:1px solid var(--line);border-radius:99px;padding:3px;background:var(--panel)}
+.mode button{font:inherit;font-size:13px;font-weight:600;border:0;background:transparent;color:var(--muted);padding:6px 14px;border-radius:99px;cursor:pointer}
+.mode button[aria-pressed="true"]{background:var(--accent);color:var(--panel)}
 .picker button{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--panel);color:var(--ink);
   padding:9px 14px;border-radius:8px;cursor:pointer}
 .picker button small{display:block;font-weight:500;color:var(--muted);font-size:12px}
@@ -47,7 +51,7 @@ h1{font-size:28px;line-height:1.15;margin:0;text-wrap:balance;letter-spacing:-.0
 .verdict{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;padding:14px 18px;border-radius:10px;border:1px solid var(--line);background:var(--panel)}
 .verdict strong{font-size:20px;text-transform:capitalize}
 .verdict p{margin:0;max-width:80ch;color:var(--muted)}
-.v-healthy{color:var(--ok)}.v-visible{color:var(--warn)}.v-misleading,.v-invisible,.v-missing{color:var(--bad)}
+.v-healthy,.v-catchable{color:var(--ok)}.v-lucky{color:var(--warn)}.v-visible{color:var(--warn)}.v-misleading,.v-invisible,.v-missing{color:var(--bad)}
 .trace{overflow-x:auto}
 .rows{min-width:640px;display:grid;gap:2px}
 .row{display:grid;grid-template-columns:34px minmax(220px,2.2fr) minmax(120px,1fr) 64px 58px;gap:8px;align-items:center;font-size:13px;padding:3px 4px;border-radius:5px}
@@ -64,7 +68,7 @@ h1{font-size:28px;line-height:1.15;margin:0;text-wrap:balance;letter-spacing:-.0
 .st{font-size:12px;font-weight:700;text-align:right}
 .st.ok{color:var(--ok)}.st.error{color:var(--bad)}.st.missing{color:var(--ghost)}
 .flag{grid-column:2 / -1;font-size:12px;font-weight:600;margin:-2px 0 4px}
-.flag.false{color:var(--warn)}.flag.hand{color:var(--muted)}.flag.lie,.flag.gone{color:var(--bad)}.flag.real{color:var(--muted)}
+.flag.false{color:var(--warn)}.flag.rec{color:var(--accent)}.flag.hand{color:var(--muted)}.flag.lie,.flag.gone{color:var(--bad)}.flag.real{color:var(--muted)}
 .row.ghost .op{color:var(--ghost)}
 .legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--muted);margin-top:12px}
 .foot{font-size:13px;color:var(--muted);display:grid;gap:6px;max-width:90ch}
@@ -78,10 +82,18 @@ h1{font-size:28px;line-height:1.15;margin:0;text-wrap:balance;letter-spacing:-.0
 <main class="wrap">
   <header>
     <h1>MCP Incident Lab</h1>
-    <p class="lede">An inventory agent (Node, <span class="mono">@sentry/node</span>) asks an MCP tool (Python, <span class="mono">sentry-sdk</span> with <span class="mono">MCPIntegration</span>) whether <b>SKU-1001</b> is in stock. It is: <b>42 units</b>. Break the tool and compare what the agent said, what really happened, and what Sentry recorded.</p>
+    <p class="lede">An inventory agent (Node, <span class="mono">@sentry/node</span>) asks an MCP tool (Python, <span class="mono">sentry-sdk</span> with <span class="mono">MCPIntegration</span>) whether <b id="skuName">SKU-1001</b> is in stock. Really: <b id="skuUnits">42 units</b>. Break the tool and compare what the agent said, what really happened, and what Sentry recorded.</p>
   </header>
 
-  <nav class="picker" aria-label="Scenario" id="picker"></nav>
+  <div class="controls">
+    <nav class="mode" aria-label="SKU" id="skus"></nav>
+    <nav class="picker" aria-label="Scenario" id="picker"></nav>
+    <div class="mode" role="group" aria-label="SDK version" id="mode">
+      <button type="button" data-mode="today" aria-pressed="true">Today's SDKs</button>
+      <button type="button" data-mode="fixed" aria-pressed="false">With fixes</button>
+    </div>
+  </div>
+  <p class="lede" id="modeNote"></p>
 
   <div class="verdict" id="verdict" aria-live="polite"></div>
 
@@ -98,7 +110,8 @@ h1{font-size:28px;line-height:1.15;margin:0;text-wrap:balance;letter-spacing:-.0
   </div>
 
   <footer class="foot">
-    <p>This page replays one real run. Both SDKs are the real ones (sentry-sdk 2.71.0, @sentry/node 11.4.0, mcp 2.3.0) and every span above was read back from Sentry's API. The model is scripted, so it is not an LLM, but it answers the way agents commonly do when a tool fails: confidently. Ground truth comes from the server's own log, not from Sentry.</p>
+    <p>"With fixes" is a second real run with three changes: span streaming on the Python side (<span class="mono">trace_lifecycle="stream"</span>), tool results recorded (<span class="mono">send_default_pii=True</span>, so only where that's acceptable), and <span class="mono">@sentry/node</span> built from <a href="https://github.com/getsentry/sentry-javascript/pull/25129">getsentry/sentry-javascript#25129</a>. In one earlier attempt some Python span uploads failed on the network and were lost. In the run shown, every tool span arrived; one Python HTTP span is missing from 1 of the 12 traces.</p>
+    <p>"Today's SDKs" replays one real run: 3 SKUs × 4 scenarios. Both SDKs are the real ones (sentry-sdk 2.71.0, @sentry/node 11.4.0, mcp 2.3.0) and every span above was read back from Sentry's API. The model is scripted, so it is not an LLM, but it answers the way agents commonly do when a tool fails: confidently. Ground truth comes from the server's own log, not from Sentry.</p>
     <p>Reported: <a href="https://github.com/getsentry/sentry-python/issues/7890">sentry-python#7890</a> (tool error recorded as ok), <a href="https://github.com/getsentry/sentry-python/issues/7916">sentry-python#7916</a> (slow tool spans lost). Code and repros: <a href="https://github.com/4ktLuffy/mcp-incident-lab">4ktLuffy/mcp-incident-lab</a>.</p>
   </footer>
 </main>
@@ -114,18 +127,29 @@ function flagClass(f){
   if (f.startsWith("marked error by our agent")) return "hand";
   if (f.startsWith("never reached")) return "gone";
   if (f.startsWith("real")) return "real";
+  if (f.startsWith("tool result recorded")) return "rec";
   return "lie";
 }
 
+let mode = "today", current = "tool_error", sku = "SKU-1001";
+const SKUS = [...new Set(DATA.today.map((d) => d.sku))];
+const MODE_NOTE = {today: "Released SDKs: sentry-sdk 2.71.0, @sentry/node 11.4.0.",
+  fixed: "Same scenarios, rerun with the fixes on. Switch back and forth to compare."};
 function show(id){
-  const s = DATA.find((d) => d.id === id);
+  current = id;
+  const s = DATA[mode].find((d) => d.id === id && d.sku === sku);
+  for (const b of $("skus").children) b.setAttribute("aria-pressed", String(b.dataset.sku === sku));
+  $("skuName").textContent = sku;
+  $("skuUnits").textContent = s.units ? `${s.units} units` : "0, it is out of stock";
+  for (const b of $("mode").children) b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
+  $("modeNote").textContent = MODE_NOTE[mode];
   for (const b of $("picker").children) b.setAttribute("aria-pressed", String(b.dataset.id === id));
   $("verdict").innerHTML = `<strong class="v-${s.verdict} reveal">${esc(s.verdict)}</strong><p class="reveal">${esc(s.note)}</p>`;
   const toolSeen = s.seen.threw ? `<code>${esc(s.seen.threw)}</code> (client timeout 2 s)`
     : s.seen.isError ? `<code>isError: true</code> "${esc(s.seen.text)}"` : `<code>${esc(s.seen.text)}</code>`;
   $("steps").innerHTML = [
-    ["User", "Is SKU-1001 in stock?"],
-    ["Agent (scripted model)", "calls <code>check_inventory({\"sku\": \"SKU-1001\"})</code>"],
+    ["User", `Is ${esc(sku)} in stock?`],
+    ["Agent (scripted model)", `calls <code>check_inventory({"sku": "${esc(sku)}"})</code>`],
     ["Tool result the agent saw", toolSeen],
     ["Agent answer", `<span class="answer">${esc(s.answer)}</span><span class="badge ${s.correct ? "right" : "wrong"}">${s.correct ? "right" : "wrong"}</span>`],
   ].map(([w, b], i) => `<li class="step reveal" style="animation-delay:${i*120}ms"><span class="who">${w}</span><div class="bubble">${b}</div></li>`).join("")
@@ -141,14 +165,24 @@ function show(id){
       <span class="st ${x.status}">${esc(x.status)}</span></div>`;
     return row + (x.flag ? `<div class="row flagged reveal" style="animation-delay:${200 + i*25}ms;padding-top:0"><span class="flag ${flagClass(x.flag)}">↳ ${esc(x.flag)}</span></div>` : "");
   }).join("");
-  try { history.replaceState(null, "", "#" + id); } catch (e) {}
+  try { history.replaceState(null, "", "#" + (mode === "fixed" ? "fixed-" : "") + sku + "-" + id); } catch (e) {}
 }
 
-$("picker").innerHTML = DATA.map((d) => `<button type="button" data-id="${d.id}" aria-pressed="false">${esc(d.title)}<small>${SUB[d.id]}</small></button>`).join("");
+if (!DATA.fixed) $("mode").hidden = true;
+$("mode").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { mode = b.dataset.mode; show(current); } });
+$("skus").innerHTML = SKUS.map((k) => `<button type="button" data-sku="${k}" aria-pressed="false">${k}</button>`).join("");
+$("skus").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { sku = b.dataset.sku; show(current); } });
+$("picker").innerHTML = DATA.today.filter((d) => d.sku === SKUS[0]).map((d) => `<button type="button" data-id="${d.id}" aria-pressed="false">${esc(d.title)}<small>${SUB[d.id]}</small></button>`).join("");
 $("picker").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) show(b.dataset.id); });
-window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (DATA.some((d) => d.id === h)) show(h); });
-const start = location.hash.slice(1);
-show(DATA.some((d) => d.id === start) ? start : "tool_error");
+function fromHash(){
+  let h = location.hash.slice(1);
+  if (h.startsWith("fixed-") && DATA.fixed) { mode = "fixed"; h = h.slice(6); } else mode = "today";
+  const m = h.match(/^(SKU-\d+)-(.+)$/);
+  if (m && SKUS.includes(m[1])) { sku = m[1]; h = m[2]; }
+  show(DATA.today.some((d) => d.id === h) ? h : "tool_error");
+}
+window.addEventListener("hashchange", fromHash);
+fromHash();
 </script>
 </body>
 </html>

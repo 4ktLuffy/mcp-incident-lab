@@ -38,7 +38,7 @@ def build(report: dict) -> str:
         if s:
             sentry += f"<br><small>other error spans: {esc(', '.join(s['error_spans']) or 'none')}</small>"
         ok = r["answer_correct"]
-        e.append(f"""<section class="row"><h2><span>{esc(r['title'])}</span><span class="v {esc(r['verdict'].replace(' ', '-'))}">{esc(r['verdict'])}</span></h2><dl>
+        e.append(f"""<section class="row"><h2><span>{esc(r['sku'])} · {esc(r['title'])}</span><span class="v {esc(r['verdict'].replace(' ', '-'))}">{esc(r['verdict'])}</span></h2><dl>
 <dt>What happened</dt><dd>{esc(r['what_happened'])} <small>(server truth log)</small></dd>
 <dt>Agent said</dt><dd>{esc(r['agent_answer'])} <span class="{'yes' if ok else 'no'}">{'correct' if ok else 'wrong'}</span> (real: {esc(r['correct_answer'])})</dd>
 <dt>Sentry showed</dt><dd>{sentry}</dd>
@@ -46,7 +46,7 @@ def build(report: dict) -> str:
     note = "Sentry columns were read back from the API." if report["readback"] else "Sentry was not read back for this run."
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MCP Incident Lab</title><style>{CSS}</style></head><body><main>
-<h1>MCP Incident Lab</h1><p class="sub">One in-stock SKU ({esc(report['sku'])}), four runs. The model is scripted, not a real LLM. {esc(note)}</p>
+<h1>MCP Incident Lab</h1><p class="sub">Three SKUs ({esc(', '.join(report['skus']))}), four scenarios each. The model is scripted, not a real LLM. {esc(note)}</p>
 {''.join(e)}<footer>Ground truth comes from the server's own log, written outside the Sentry SDK.</footer></main></body></html>"""
 
 

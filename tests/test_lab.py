@@ -62,6 +62,7 @@ def test_verdicts():
     dropped = labcore.summarize_spans([span("gen_ai.execute_tool", "error")])
     assert green["joined"] and green["error_spans"] == []
     assert labcore.verdict(True, False, green) == "healthy"
+    assert labcore.verdict(True, True, green, broken=True) == "lucky"   # broken tool, SKU really out of stock
     assert labcore.verdict(False, False, green) == "invisible"   # stale data
     assert labcore.verdict(False, True, green) == "misleading"   # failed but all green
     assert labcore.verdict(False, True, red) == "visible"
@@ -70,6 +71,8 @@ def test_verdicts():
     assert noisy["false_http_errors"] == 1 and labcore.verdict(False, False, noisy) == "invisible"
     assert labcore.verdict(False, False, real_http) == "visible"     # a real 5xx still counts
     assert labcore.verdict(False, True, dropped) == "missing"
+    aborted = labcore.summarize_spans([span("gen_ai.execute_tool", "error"), span("http.client", "error", code=None)])
+    assert aborted["false_http_errors"] == 1 and labcore.verdict(False, True, aborted) == "missing"
     assert labcore.verdict(False, True, None) == "not read back"
 
 

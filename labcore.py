@@ -49,12 +49,16 @@ def summarize_spans(rows: list[dict], error_events: int = 0) -> dict:
 
     The MCP integration's own span (mcp.server) is kept apart from the execute_tool span our
     agent code creates and marks by hand, so the verdict only credits what Sentry recorded.
-    HTTP client spans marked error although the server answered 2xx are counted as noise.
+    HTTP client spans marked error only because the client closed them (2xx or no response yet) are
+    counted as noise.
     """
     py = next((r for r in rows if r.get("span.op") == "mcp.server"), None)
     js = next((r for r in rows if r.get("span.op") == "gen_ai.execute_tool"), None)
     bad = [r for r in rows if r.get("span.status") not in OK_STATUSES]
-    noise = [r for r in bad if r.get("span.op") == "http.client" and 200 <= (r.get("http.response.status_code") or 0) < 300]
+    # http.client spans marked error although nothing failed: a 2xx response whose stream the client
+    # closed, or a request the client aborted on close() before any response (no status code at all).
+    noise = [r for r in bad if r.get("span.op") == "http.client"
+             and (not r.get("http.response.status_code") or 200 <= r["http.response.status_code"] < 300)]
     sdk_bad = [r for r in bad if r not in noise and r is not js]
     return {
         "spans": len(rows),
@@ -69,8 +73,10 @@ def summarize_spans(rows: list[dict], error_events: int = 0) -> dict:
     }
 
 
-def verdict(answer_correct: bool, truth_failed: bool, sentry: dict | None) -> str:
-    """healthy | visible | missing | misleading | invisible | not read back.
+def verdict(answer_correct: bool, truth_failed: bool, sentry: dict | None, broken: bool = False) -> str:
+    """healthy | lucky | visible | missing | misleading | invisible | not read back.
+
+    lucky: the tool was broken but the answer is right anyway (e.g. the SKU really is out of stock).
 
     Judged on Sentry's own instrumentation only (not the span our agent code marks by hand,
     and not 2xx HTTP spans marked error):
@@ -80,7 +86,7 @@ def verdict(answer_correct: bool, truth_failed: bool, sentry: dict | None) -> st
     invisible: wrong answer, the tool did not fail by its own account, everything is green.
     """
     if answer_correct:
-        return "healthy"
+        return "lucky" if broken else "healthy"
     if sentry is None:
         return "not read back"
     if sentry["error_spans"] or sentry["error_events"]:
@@ -94,17 +100,21 @@ def truth_failed(truth: dict | None, agent: dict) -> bool:
     return bool(truth and truth.get("is_error")) or bool((agent.get("tool_result_seen") or {}).get("threw"))
 
 
-def build_report(joined: list[dict], sentry_by_run: dict | None, real_units: int, timeout_ms: int) -> list[dict]:
+def build_report(joined: list[dict], sentry_by_run: dict | None, real_units: dict[str, int] | int,
+                 timeout_ms: int) -> list[dict]:
     rows = []
     for j in joined:
         a, t = j["agent"], j["truth"]
         s = (sentry_by_run or {}).get(j["run_id"]) if sentry_by_run is not None else None
+        sku = a.get("sku")
+        units = real_units.get(sku, 0) if isinstance(real_units, dict) else real_units
         rows.append({
             "scenario": j["fault"], "title": TITLES.get(j["fault"], j["fault"]), "run_id": j["run_id"],
-            "trace_id": a.get("trace_id"), "what_happened": what_happened(j["fault"], t, a, real_units, timeout_ms),
+            "trace_id": a.get("trace_id"), "what_happened": what_happened(j["fault"], t, a, units, timeout_ms),
             "agent_answer": a["final_answer"], "correct_answer": a["correct_answer"],
             "answer_correct": a["answer_correct"], "propagated_header_matches": j["propagated"],
-            "truth": t, "sentry": s, "verdict": verdict(a["answer_correct"], truth_failed(t, a), s),
+            "truth": t, "sentry": s, "sku": sku,
+            "verdict": verdict(a["answer_correct"], truth_failed(t, a), s, broken=j["fault"] != "none"),
         })
     return rows
 

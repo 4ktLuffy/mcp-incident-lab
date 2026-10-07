@@ -100,8 +100,11 @@ def main() -> None:
     import uvicorn
     from sentry_sdk.integrations.mcp import MCPIntegration
 
+    # --with-fixes: span streaming (spans are sent as they end) and tool results recorded on the span.
+    extra = {"trace_lifecycle": "stream"} if os.environ.get("LAB_PY_STREAM") else {}
     sentry_sdk.init(dsn=os.environ.get("SENTRY_DSN_PY") or None, traces_sample_rate=1.0,
-                    send_default_pii=False, integrations=[MCPIntegration()])
+                    send_default_pii=bool(os.environ.get("LAB_PY_RECORD_OUTPUTS")),
+                    integrations=[MCPIntegration()], **extra)
     uvicorn.run(build_app(), host="127.0.0.1", port=int(os.environ.get("LAB_PORT", "8765")),
                 log_level="warning")
 
