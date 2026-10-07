@@ -50,7 +50,9 @@ def test_slow_duration_logged(tmp_path, monkeypatch):
 
 
 def span(op, status="ok", dur=5, code=None):
-    return {"span.op": op, "span.status": status, "span.duration": dur, "http.response.status_code": code}
+    desc = "tools/call check_inventory" if op == "mcp.server" else op
+    return {"span.op": op, "span.status": status, "span.duration": dur, "http.response.status_code": code,
+            "span.description": desc}
 
 
 def test_verdicts():
@@ -61,6 +63,9 @@ def test_verdicts():
     real_http = labcore.summarize_spans([span("mcp.server"), span("gen_ai.execute_tool"), span("http.client", "error", code=500)])
     dropped = labcore.summarize_spans([span("gen_ai.execute_tool", "error")])
     assert green["joined"] and green["error_spans"] == []
+    init_first = labcore.summarize_spans([{"span.op": "mcp.server", "span.status": "ok", "span.description": "initialize"},
+                                          span("mcp.server", "internal_error"), span("gen_ai.execute_tool")])
+    assert init_first["py_status"] == "internal_error"   # the tool call's span, not initialize
     assert labcore.verdict(True, False, green) == "healthy"
     assert labcore.verdict(True, True, green, broken=True) == "lucky"   # broken tool, SKU really out of stock
     assert labcore.verdict(False, False, green) == "invisible"   # stale data

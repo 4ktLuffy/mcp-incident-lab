@@ -18,6 +18,8 @@ import labcore
 ROOT = Path(__file__).resolve().parent
 RUNS = ROOT / "runs"
 FIX_ENV: dict[str, str] = {}  # set by --with-fixes
+MODEL = "scripted"  # set by --model
+SERVER = "py"  # set by --server
 SKUS = ["SKU-1001", "SKU-2002", "SKU-3003"]  # 42 in stock, really out of stock, 7 in stock
 TIMEOUT_MS = 2000
 DUMMY_DSN = "http://lab@127.0.0.1:9/1"  # local, goes nowhere
@@ -59,7 +61,7 @@ def api_get(path: str, params: list[tuple[str, str]]) -> dict:
 
 
 FIELDS = ["id", "span.op", "span.description", "span.status", "span.duration", "is_transaction",
-          "http.response.status_code", "project.name", "precise.start_ts",
+          "http.response.status_code", "project.name", "release", "precise.start_ts",
           "mcp.tool.result.content"]
 
 
@@ -109,8 +111,8 @@ def run_lab(offline_dsn: bool) -> None:
     if offline_dsn:
         env["SENTRY_DSN_PY"] = env["SENTRY_DSN_JS"] = DUMMY_DSN
     py = ROOT / ".venv/bin/python"
-    server = subprocess.Popen([str(py), "-m", "server.server"], cwd=ROOT, env=env,
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    cmd, cwd = ([str(py), "-m", "server.server"], ROOT) if SERVER == "py" else (["node", "mcp_server.mjs"], ROOT / "agent")
+    server = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         wait_port(port)
         for sku in SKUS:
@@ -118,7 +120,7 @@ def run_lab(offline_dsn: bool) -> None:
             print(f"running {sku} {fault}...", flush=True)
             subprocess.run(["node", "agent.mjs", "--run-id", f"lab-{sku}-{fault}-{int(time.time())}", "--fault", fault,
                             "--sku", sku, "--mcp-url", f"http://127.0.0.1:{port}/mcp",
-                            "--timeout-ms", str(TIMEOUT_MS), "--runs-dir", str(RUNS)],
+                            "--timeout-ms", str(TIMEOUT_MS), "--runs-dir", str(RUNS), "--model", MODEL],
                            cwd=ROOT / "agent", env=env, check=True, stdout=subprocess.DEVNULL)
         end = time.time() + 20  # the slow call finishes on the server after the client left
         while time.time() < end and len(labcore.read_jsonl(RUNS / "truth.jsonl")) < len(SKUS) * len(labcore.SCENARIOS):
@@ -135,23 +137,32 @@ def main() -> None:
     ap.add_argument("--wait", type=int, default=45, help="seconds to wait before reading back")
     ap.add_argument("--offline-dsn", action="store_true",
                     help="use a dummy local DSN so trace headers propagate without sending anything")
+    ap.add_argument("--model", choices=["scripted", "codex"], default="scripted",
+                    help="codex: a real model through the Codex CLI (no API key); writes to runs-codex*/")
     ap.add_argument("--with-fixes", metavar="SENTRY_NODE_BUILD",
                     help="rerun with the fixes on: span streaming and recorded tool results in Python, and the "
                          "@sentry/node build at this path (e.g. the getsentry/sentry-javascript#25129 branch, "
                          "packages/node/build/esm/index.js). Writes to runs-fixed/")
+    ap.add_argument("--server", choices=["py", "js"], default="py",
+                    help="which MCP server to run: server/server.py (py) or agent/mcp_server.mjs (js, writes to runs-js/)")
     args = ap.parse_args()
 
+    global RUNS, SERVER, MODEL
+    SERVER, MODEL = args.server, args.model
+    if SERVER == "js":
+        RUNS = ROOT / "runs-js"
     if args.with_fixes:
-        global RUNS
-        RUNS = ROOT / "runs-fixed"
+        RUNS = ROOT / ("runs-js-fixed" if SERVER == "js" else "runs-fixed")
         FIX_ENV.update(LAB_SENTRY_NODE=str(Path(args.with_fixes).resolve()), LAB_PY_STREAM="1", LAB_PY_RECORD_OUTPUTS="1")
+    if MODEL == "codex":
+        RUNS = RUNS.with_name(RUNS.name + "-codex")
     run_lab(args.offline_dsn)
     joined = labcore.join_runs(labcore.read_jsonl(RUNS / "truth.jsonl"), labcore.read_jsonl(RUNS / "agent.jsonl"))
     sentry = readback(joined, args.wait) if args.readback else None
     units = {k: v["in_stock"] for k, v in json.loads((ROOT / "server/inventory.json").read_text()).items()}
     report = labcore.build_report(joined, sentry, units, TIMEOUT_MS)
     (RUNS / "report.json").write_text(json.dumps(
-        {"skus": SKUS, "client_timeout_ms": TIMEOUT_MS, "model": "scripted", "readback": bool(args.readback),
+        {"skus": SKUS, "client_timeout_ms": TIMEOUT_MS, "model": MODEL, "readback": bool(args.readback),
          "scenarios": report}, indent=2))
 
     hdr = ("sku", "scenario", "what really happened", "answer correct?", "what Sentry showed", "verdict")

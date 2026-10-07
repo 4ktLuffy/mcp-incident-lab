@@ -4,3 +4,6 @@ runs/
 __pycache__/
 .pytest_cache/
 runs-fixed/
+runs-js/
+runs-js-fixed/
+runs*-codex/

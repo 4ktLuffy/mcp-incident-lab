@@ -1,4 +1,5 @@
-// Inventory agent. The "model" is SCRIPTED (see fake_llm.mjs), not a real LLM.
+// Inventory agent. The model is SCRIPTED (fake_llm.mjs) by default, or a real one through the
+// Codex CLI with --model codex (codex_llm.mjs).
 // LAB_SENTRY_NODE points at a locally built @sentry/node (lab.py --with-fixes); default is the installed release.
 const Sentry = await import(process.env.LAB_SENTRY_NODE || "@sentry/node");
 import OpenAI from "openai";
@@ -8,6 +9,7 @@ import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startFakeLlm } from "./fake_llm.mjs";
+import { startCodexLlm, CODEX_MODEL } from "./codex_llm.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const arg = (n, d) => { const i = process.argv.indexOf("--" + n); return i > 0 ? process.argv[i + 1] : d; };
@@ -17,6 +19,8 @@ const sku = arg("sku", "SKU-1001");
 const mcpUrl = arg("mcp-url", "http://127.0.0.1:8765/mcp");
 const timeoutMs = Number(arg("timeout-ms", "2000"));
 const runsDir = resolve(arg("runs-dir", resolve(here, "../runs")));
+const useCodex = arg("model", "scripted") === "codex";
+const modelName = useCodex ? CODEX_MODEL : "scripted-model-v1";
 
 Sentry.init({
   dsn: process.env.SENTRY_DSN_JS || undefined,
@@ -28,7 +32,7 @@ Sentry.init({
 const table = JSON.parse(readFileSync(resolve(here, "../server/inventory.json"), "utf8"));
 const correctAnswer = (table[sku]?.in_stock ?? 0) > 0 ? "in stock" : "out of stock";
 
-const { server: llmServer, port } = await startFakeLlm();
+const { server: llmServer, port } = await (useCodex ? startCodexLlm() : startFakeLlm());
 const openai = Sentry.instrumentOpenAiClient(
   new OpenAI({ apiKey: "scripted", baseURL: `http://127.0.0.1:${port}/v1` }),
   { recordInputs: false, recordOutputs: false });
@@ -67,18 +71,27 @@ await Sentry.startSpan({ op: "gen_ai.invoke_agent", name: "invoke_agent inventor
 async (span) => {
   traceId = span.spanContext().traceId;
   const messages = [{ role: "user", content: `Is ${sku} in stock?` }];
-  const first = await openai.chat.completions.create({ model: "scripted-model-v1", messages, tools });
-  const call = first.choices[0].message.tool_calls[0];
-  seen = await callTool(JSON.parse(call.function.arguments));
-  messages.push(first.choices[0].message,
-    { role: "tool", tool_call_id: call.id, content: seen.text || (seen.threw ? "" : "") });
-  const second = await openai.chat.completions.create({ model: "scripted-model-v1", messages, tools });
-  answer = second.choices[0].message.content;
+  // Up to 3 model turns: a real model may answer without the tool, or call it again.
+  for (let turn = 0; turn < 3; turn++) {
+    const r = await openai.chat.completions.create({ model: modelName, messages, tools });
+    const msg = r.choices[0].message, call = msg.tool_calls?.[0];
+    if (!call) { answer = msg.content || ""; break; }
+    seen = await callTool(JSON.parse(call.function.arguments));
+    // What a normal developer passes back: the tool's text, or the error if the call threw.
+    messages.push(msg, { role: "tool", tool_call_id: call.id, content: seen.text || (seen.threw ? `Error: ${seen.threw}` : "") });
+  }
 });
 
-const correct = answer.includes(correctAnswer) && !(correctAnswer === "in stock" && answer.includes("out of stock"));
-const row = { run_id: runId, fault, sku, trace_id: traceId, model: "scripted", final_answer: answer,
-  correct_answer: `SKU ${sku} is ${correctAnswer}`, answer_correct: correct, tool_result_seen: seen };
+// What the answer claims: out of stock, in stock, or neither (e.g. "I couldn't check").
+const a = answer.toLowerCase();
+const hedged = /couldn['’]?t|could not|unable|can['’]?t|cannot|not sure|unknown|try again|don['’]?t know|unclear/.test(a);
+const claim = hedged ? null
+  : /out of stock|not in stock|no units|0 units|zero units|none in stock|unavailable/.test(a) ? "out of stock"
+  : /in stock|available|\d+ units/.test(a) ? "in stock" : null;
+const answerKind = claim === null ? "unclear" : claim === correctAnswer ? "right" : "wrong";
+const correct = answerKind === "right";
+const row = { run_id: runId, fault, sku, trace_id: traceId, model: useCodex ? CODEX_MODEL : "scripted", final_answer: answer,
+  correct_answer: `SKU ${sku} is ${correctAnswer}`, answer_correct: correct, answer_kind: answerKind, tool_result_seen: seen };
 mkdirSync(runsDir, { recursive: true });
 appendFileSync(resolve(runsDir, "agent.jsonl"), JSON.stringify(row) + "\n");
 console.log(JSON.stringify(row));

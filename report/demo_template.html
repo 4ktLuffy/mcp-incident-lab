@@ -51,7 +51,8 @@ h1{font-size:28px;line-height:1.15;margin:0;text-wrap:balance;letter-spacing:-.0
 .verdict{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;padding:14px 18px;border-radius:10px;border:1px solid var(--line);background:var(--panel)}
 .verdict strong{font-size:20px;text-transform:capitalize}
 .verdict p{margin:0;max-width:80ch;color:var(--muted)}
-.v-healthy,.v-catchable{color:var(--ok)}.v-lucky{color:var(--warn)}.v-visible{color:var(--warn)}.v-misleading,.v-invisible,.v-missing{color:var(--bad)}
+.v-healthy,.v-catchable{color:var(--ok)}.v-hedged{color:var(--accent)}
+.hedge{background:var(--soft);color:var(--accent)}.v-lucky{color:var(--warn)}.v-visible{color:var(--warn)}.v-misleading,.v-invisible,.v-missing{color:var(--bad)}
 .trace{overflow-x:auto}
 .rows{min-width:640px;display:grid;gap:2px}
 .row{display:grid;grid-template-columns:34px minmax(220px,2.2fr) minmax(120px,1fr) 64px 58px;gap:8px;align-items:center;font-size:13px;padding:3px 4px;border-radius:5px}
@@ -82,7 +83,7 @@ h1{font-size:28px;line-height:1.15;margin:0;text-wrap:balance;letter-spacing:-.0
 <main class="wrap">
   <header>
     <h1>MCP Incident Lab</h1>
-    <p class="lede">An inventory agent (Node, <span class="mono">@sentry/node</span>) asks an MCP tool (Python, <span class="mono">sentry-sdk</span> with <span class="mono">MCPIntegration</span>) whether <b id="skuName">SKU-1001</b> is in stock. Really: <b id="skuUnits">42 units</b>. Break the tool and compare what the agent said, what really happened, and what Sentry recorded.</p>
+    <p class="lede">An inventory agent (Node, <span class="mono">@sentry/node</span>) asks an MCP tool (<span id="serverDesc">Python, <span class="mono">sentry-sdk</span> with <span class="mono">MCPIntegration</span></span>) whether <b id="skuName">SKU-1001</b> is in stock. Really: <b id="skuUnits">42 units</b>. Break the tool and compare what the agent said, what really happened, and what Sentry recorded.</p>
   </header>
 
   <div class="controls">
@@ -91,6 +92,8 @@ h1{font-size:28px;line-height:1.15;margin:0;text-wrap:balance;letter-spacing:-.0
     <div class="mode" role="group" aria-label="SDK version" id="mode">
       <button type="button" data-mode="today" aria-pressed="true">Today's SDKs</button>
       <button type="button" data-mode="fixed" aria-pressed="false">With fixes</button>
+      <button type="button" data-mode="js" aria-pressed="false">JS MCP server</button>
+      <button type="button" data-mode="codex" aria-pressed="false">Real model</button>
     </div>
   </div>
   <p class="lede" id="modeNote"></p>
@@ -105,7 +108,7 @@ h1{font-size:28px;line-height:1.15;margin:0;text-wrap:balance;letter-spacing:-.0
     <section class="panel">
       <h2 class="label">What Sentry recorded (spans read back from Sentry)</h2>
       <div class="trace"><div class="rows" id="rows"></div></div>
-      <div class="legend"><span><span class="side js">JS</span> agent</span><span><span class="side py">PY</span> MCP server</span><span>dashed bar: span that never arrived</span></div>
+      <div class="legend"><span><span class="side js">JS</span> agent</span><span><span class="side py">PY</span> / <span class="side py">JS·S</span> MCP server, Python or JS</span><span>dashed bar: span that never arrived</span></div>
     </section>
   </div>
 
@@ -134,7 +137,9 @@ function flagClass(f){
 let mode = "today", current = "tool_error", sku = "SKU-1001";
 const SKUS = [...new Set(DATA.today.map((d) => d.sku))];
 const MODE_NOTE = {today: "Released SDKs: sentry-sdk 2.71.0, @sentry/node 11.4.0.",
-  fixed: "Same scenarios, rerun with the fixes on. Switch back and forth to compare."};
+  fixed: "Same scenarios, rerun with the fixes on. Switch back and forth to compare.",
+  codex: "Same scenarios, but the agent's model is a real one (gpt-5.6-sol, low effort, through the Codex CLI, no API key) instead of the scripted one.",
+  js: "Same agent and scenarios, but the MCP server is written in JavaScript (@sentry/node 11.4.0 with wrapMcpServerWithSentry) instead of Python."};
 function show(id){
   current = id;
   const s = DATA[mode].find((d) => d.id === id && d.sku === sku);
@@ -143,32 +148,34 @@ function show(id){
   $("skuUnits").textContent = s.units ? `${s.units} units` : "0, it is out of stock";
   for (const b of $("mode").children) b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
   $("modeNote").textContent = MODE_NOTE[mode];
+  $("serverDesc").innerHTML = mode === "js" ? 'JavaScript, <span class="mono">wrapMcpServerWithSentry</span>'
+    : 'Python, <span class="mono">sentry-sdk</span> with <span class="mono">MCPIntegration</span>';
   for (const b of $("picker").children) b.setAttribute("aria-pressed", String(b.dataset.id === id));
   $("verdict").innerHTML = `<strong class="v-${s.verdict} reveal">${esc(s.verdict)}</strong><p class="reveal">${esc(s.note)}</p>`;
   const toolSeen = s.seen.threw ? `<code>${esc(s.seen.threw)}</code> (client timeout 2 s)`
     : s.seen.isError ? `<code>isError: true</code> "${esc(s.seen.text)}"` : `<code>${esc(s.seen.text)}</code>`;
   $("steps").innerHTML = [
     ["User", `Is ${esc(sku)} in stock?`],
-    ["Agent (scripted model)", `calls <code>check_inventory({"sku": "${esc(sku)}"})</code>`],
+    [`Agent (${esc(s.model)})`, `calls <code>check_inventory({"sku": "${esc(sku)}"})</code>${s.calls > 1 ? ` ${s.calls} times` : ""}`],
     ["Tool result the agent saw", toolSeen],
-    ["Agent answer", `<span class="answer">${esc(s.answer)}</span><span class="badge ${s.correct ? "right" : "wrong"}">${s.correct ? "right" : "wrong"}</span>`],
+    ["Agent answer", `<span class="answer">${esc(s.answer)}</span><span class="badge ${s.kind === "unclear" ? "hedge" : s.correct ? "right" : "wrong"}">${s.kind === "unclear" ? "says it couldn't tell" : s.correct ? "right" : "wrong"}</span>`],
   ].map(([w, b], i) => `<li class="step reveal" style="animation-delay:${i*120}ms"><span class="who">${w}</span><div class="bubble">${b}</div></li>`).join("")
     + `<li class="step reveal" style="animation-delay:480ms"><div class="truth">Server log: ${esc(s.truth)}</div></li>`;
   const end = Math.max(...s.spans.map((x) => x.start + x.dur));
   $("rows").innerHTML = s.spans.map((x, i) => {
     const left = (x.start / end) * 100, width = Math.max((x.dur / end) * 100, 0.4);
     const row = `<div class="row ${x.flag ? "flagged" : ""} ${x.ghost ? "ghost" : ""} reveal" style="animation-delay:${200 + i*25}ms">
-      <span class="side ${x.side.startsWith("JS") ? "js" : "py"}">${x.side.startsWith("JS") ? "JS" : "PY"}</span>
+      <span class="side ${x.side === "JS agent" ? "js" : "py"}">${x.side === "JS agent" ? "JS" : x.side === "JS MCP server" ? "JS·S" : "PY"}</span>
       <span class="op" title="${esc(x.op + " " + x.desc)}">${esc(x.op)} <span>${esc(x.desc)}</span></span>
       <span class="track"><span class="bar ${x.status}" style="left:${left}%;width:${Math.min(width, 100 - left)}%"></span></span>
       <span class="dur">${fmt(x.dur)}</span>
       <span class="st ${x.status}">${esc(x.status)}</span></div>`;
     return row + (x.flag ? `<div class="row flagged reveal" style="animation-delay:${200 + i*25}ms;padding-top:0"><span class="flag ${flagClass(x.flag)}">↳ ${esc(x.flag)}</span></div>` : "");
   }).join("");
-  try { history.replaceState(null, "", "#" + (mode === "fixed" ? "fixed-" : "") + sku + "-" + id); } catch (e) {}
+  try { history.replaceState(null, "", "#" + (mode === "today" ? "" : mode + "-") + sku + "-" + id); } catch (e) {}
 }
 
-if (!DATA.fixed) $("mode").hidden = true;
+for (const b of $("mode").children) if (!DATA[b.dataset.mode]) b.hidden = true;
 $("mode").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { mode = b.dataset.mode; show(current); } });
 $("skus").innerHTML = SKUS.map((k) => `<button type="button" data-sku="${k}" aria-pressed="false">${k}</button>`).join("");
 $("skus").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { sku = b.dataset.sku; show(current); } });
@@ -176,7 +183,9 @@ $("picker").innerHTML = DATA.today.filter((d) => d.sku === SKUS[0]).map((d) => `
 $("picker").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) show(b.dataset.id); });
 function fromHash(){
   let h = location.hash.slice(1);
-  if (h.startsWith("fixed-") && DATA.fixed) { mode = "fixed"; h = h.slice(6); } else mode = "today";
+  if (h.startsWith("fixed-") && DATA.fixed) { mode = "fixed"; h = h.slice(6); }
+  else if (h.startsWith("js-") && DATA.js) { mode = "js"; h = h.slice(3); }
+  else if (h.startsWith("codex-") && DATA.codex) { mode = "codex"; h = h.slice(6); } else mode = "today";
   const m = h.match(/^(SKU-\d+)-(.+)$/);
   if (m && SKUS.includes(m[1])) { sku = m[1]; h = m[2]; }
   show(DATA.today.some((d) => d.id === h) ? h : "tool_error");

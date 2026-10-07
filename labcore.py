@@ -52,7 +52,9 @@ def summarize_spans(rows: list[dict], error_events: int = 0) -> dict:
     HTTP client spans marked error only because the client closed them (2xx or no response yet) are
     counted as noise.
     """
-    py = next((r for r in rows if r.get("span.op") == "mcp.server"), None)
+    # the tool call's span (the JS integration also records initialize as mcp.server)
+    py = next((r for r in rows if r.get("span.op") == "mcp.server"
+               and str(r.get("span.description") or "").startswith("tools/call")), None)
     js = next((r for r in rows if r.get("span.op") == "gen_ai.execute_tool"), None)
     bad = [r for r in rows if r.get("span.status") not in OK_STATUSES]
     # http.client spans marked error although nothing failed: a 2xx response whose stream the client
@@ -114,7 +116,10 @@ def build_report(joined: list[dict], sentry_by_run: dict | None, real_units: dic
             "agent_answer": a["final_answer"], "correct_answer": a["correct_answer"],
             "answer_correct": a["answer_correct"], "propagated_header_matches": j["propagated"],
             "truth": t, "sentry": s, "sku": sku,
-            "verdict": verdict(a["answer_correct"], truth_failed(t, a), s, broken=j["fault"] != "none"),
+            "answer_kind": a.get("answer_kind"),
+            # "hedged": the agent said it couldn't tell, instead of giving a confident answer
+            "verdict": "hedged" if a.get("answer_kind") == "unclear"
+                       else verdict(a["answer_correct"], truth_failed(t, a), s, broken=j["fault"] != "none"),
         })
     return rows
 

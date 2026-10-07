@@ -18,6 +18,7 @@ An inventory agent asks an MCP server whether a SKU is in stock. Three SKUs: SKU
 Each run gets a verdict, judged only on what Sentry's own instrumentation recorded. The span our agent code marks by hand doesn't count, and neither do HTTP spans marked error on a 2xx response (see below).
 
 - **healthy:** right answer, tool not broken.
+- **hedged:** the agent told the user it couldn't tell, instead of answering (seen with the real model).
 - **lucky:** the tool was broken but the answer is right anyway. On SKU-2002, which really has 0, every broken run says "out of stock" and is right by luck. Its healthy run also says "out of stock", which shows the scripted model follows the tool and isn't hardcoded.
 - **visible:** Sentry marked a real span or event as an error.
 - **missing:** the tool ran on the server, but its span never reached Sentry.
@@ -55,6 +56,30 @@ Three things we checked with controls:
 An MCP timeout is not an HTTP failure. When the client's 2 s timeout fires, the MCP SDK rejects the call and sends a `notifications/cancelled` message; the HTTP requests are only aborted later, when the agent closes the client. So with the Node fix none of them are red, and the timeout itself shows as `MCP error -32001` on the agent's own `execute_tool` span.
 
 In one of three `--with-fixes` runs, some Python span uploads failed with "Remote end closed connection without response" and those spans were lost. Sentry's ingest kept idle connections open for at least 10 s when we checked, and `experiments/stale_conn_repro.py` could not reproduce it with a server that closes idle connections, so it is treated as a network failure and not reported. In the run on the page every tool span arrived; one Python HTTP span is missing from 1 of the 12 traces.
+
+## With a real model
+
+The scripted model is there so runs are repeatable. `lab.py --readback --model codex` swaps it for a real one: `agent/codex_llm.mjs` is a small OpenAI-compatible server that asks the Codex CLI (`codex exec`, gpt-5.6-sol, low effort) for each step, so no API key is needed and Sentry's OpenAI integration still records the calls. Token counts on those spans are what Codex reports, which includes the Codex CLI's own instructions. Results go to `runs-codex/`.
+
+| Scenario (SKU-1001 and SKU-3003) | Scripted model | Real model |
+|---|---|---|
+| Tool error | "out of stock", wrong | retried, then "I couldn't check", **hedged** |
+| Stale data | "out of stock", wrong | "out of stock", **wrong** |
+| Slow tool | "out of stock", wrong | retried, then "I couldn't check", **hedged** |
+
+The real model handles the loud failures well: it retries and then tells the user it couldn't check. The silent one, stale data, still produces a confident wrong answer, because nothing in the tool result looks wrong. In Sentry nothing changes: each retried tool error is still recorded as ok, and each retried slow call is still missing.
+
+## Same agent, JS MCP server
+
+`lab.py --readback --server js` swaps the Python MCP server for one written in JavaScript (`agent/mcp_server.mjs`, `@sentry/node` 11.4.0 with `wrapMcpServerWithSentry`). Same tool, faults and truth log. Results go to `runs-js/` and show up on the demo page as "JS MCP server".
+
+| Scenario | Python server (sentry-sdk 2.71.0) | JS server (@sentry/node 11.4.0) |
+|---|---|---|
+| Tool error | tool span ok | **error**: the JS integration reads `isError` |
+| Stale data | ok | ok |
+| Slow tool | tool span missing | **arrives**, 6,002 ms (JS sends spans as they finish), but marked ok although the client gave up |
+
+So the two gaps in the Python integration (#7890, #7916) are already handled on the JS side, which gives the Python fixes a reference to match.
 
 ## Reported
 
@@ -103,7 +128,7 @@ Env vars, read at runtime only: `SENTRY_DSN_PY`, `SENTRY_DSN_JS` (to send), and 
 
 ## Limits
 
-- The model is scripted. It is not an LLM, and its "confident wrong answer" is written in, though it copies a common real behaviour.
+- The default model is scripted, and its "confident wrong answer" is written in. With `--model codex` a real model runs instead; it hedges on loud failures and is wrong on stale data. One real-model run per scenario, so its wording varies between runs.
 - One transport (streamable HTTP), one tool, three SKUs, one run per scenario and SKU.
 - With no DSN set, the JS SDK does not emit trace headers, so propagation can only be checked with a DSN set (`--offline-dsn` uses a local dummy).
 - In the slow scenario the server keeps working after the client leaves, so the truth log shows a result the agent never saw.
