@@ -6,6 +6,20 @@ A small lab that shows how a broken MCP tool turns into a confident wrong answer
 
 Click through it yourself: [the demo page](https://4ktluffy.github.io/mcp-incident-lab/) replays one real run, using spans read back from Sentry (`docs/index.html`, built by `report/demo.py`).
 
+## The short version
+
+What Sentry's own span numbers say about the MCP tool, against what really happened (two runs for Python, one for JS, all 3 SKUs × 4 scenarios, read back with Sentry's `count()`, `failure_rate()` and `max(span.duration)` on `mcp.server` `tools/call` spans):
+
+| | Really happened | Sentry, Python MCP server | Sentry, JS MCP server |
+|---|---|---|---|
+| Tool calls | 24 (Python), 12 (JS) | **18**: the 6 slow ones are missing | 12 |
+| Failure rate | **25%** | **0%** | 25% |
+| Slowest call | **6,001 ms** | **0.6 ms** | 6,002 ms |
+
+A Python MCP server where a quarter of the tool calls fail and some take 6 seconds looks perfect: 0% failures, under a millisecond. The JS server's numbers match reality. Causes: [getsentry/sentry-python#7890](https://github.com/getsentry/sentry-python/issues/7890) (tool errors recorded as ok) and [getsentry/sentry-python#7916](https://github.com/getsentry/sentry-python/issues/7916) (slow tool spans dropped).
+
+## What it is
+
 An inventory agent asks an MCP server whether a SKU is in stock. Three SKUs: SKU-1001 (42 units), SKU-2002 (really out of stock) and SKU-3003 (7 units). We break the tool in three ways and keep our own log of what the server actually did, written by the server code and not by the Sentry SDK. Then we compare that log with the answer the agent gave and with what Sentry recorded.
 
 ## The four scenarios
