@@ -1,0 +1,34 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MCP Incident Lab</title><style>
+:root{--bg:#fafaf7;--fg:#1d1d1b;--mute:#6a6a64;--card:#fff;--line:#deded6;--ok:#1d7a46;--bad:#b3261e;--warn:#9a6700}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#eceae3;--mute:#9a9a92;--card:#1f1f1c;--line:#34342f;--ok:#5cc88a;--bad:#ff8a80;--warn:#e3b341}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
+main{max-width:920px;margin:0 auto;padding:32px 16px}
+h1{font-size:1.5rem;margin:0 0 4px}p.sub{color:var(--mute);margin:0 0 24px}
+.row{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px;margin:0 0 14px}
+.row h2{font-size:1.05rem;margin:0 0 10px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+dl{display:grid;grid-template-columns:150px 1fr;gap:6px 12px;margin:0}dt{color:var(--mute)}dd{margin:0;overflow-wrap:anywhere}
+.v{font-weight:600;padding:1px 10px;border-radius:99px;border:1px solid currentColor;font-size:.85rem}
+.healthy{color:var(--ok)}.visible{color:var(--warn)}.misleading,.invisible,.missing{color:var(--bad)}
+.no{color:var(--bad);font-weight:600}.yes{color:var(--ok);font-weight:600}
+code{font-size:.85em}footer{color:var(--mute);font-size:.85rem;margin-top:24px}
+@media(max-width:560px){dl{grid-template-columns:1fr}}
+</style></head><body><main>
+<h1>MCP Incident Lab</h1><p class="sub">One in-stock SKU (SKU-1001), four runs. The model is scripted, not a real LLM. Sentry columns were read back from the API.</p>
+<section class="row"><h2><span>Healthy control</span><span class="v healthy">healthy</span></h2><dl>
+<dt>What happened</dt><dd>tool returned in_stock=42, correct <small>(server truth log)</small></dd>
+<dt>Agent said</dt><dd>SKU SKU-1001 is in stock (42 units). <span class="yes">correct</span> (real: SKU SKU-1001 is in stock)</dd>
+<dt>Sentry showed</dt><dd>MCP tool span ok (1 ms), agent-marked span ok, false HTTP errors 2<br><small>other error spans: none</small></dd>
+<dt>Trace</dt><dd><code>aeca60d6b246469981afd692b3314d83</code>, header reached server: yes</dd></dl></section><section class="row"><h2><span>Tool error</span><span class="v misleading">misleading</span></h2><dl>
+<dt>What happened</dt><dd>tool returned isError: warehouse DB timeout <small>(server truth log)</small></dd>
+<dt>Agent said</dt><dd>SKU SKU-1001 is out of stock. <span class="no">wrong</span> (real: SKU SKU-1001 is in stock)</dd>
+<dt>Sentry showed</dt><dd>MCP tool span ok (0 ms), agent-marked span error, false HTTP errors 2<br><small>other error spans: none</small></dd>
+<dt>Trace</dt><dd><code>97b15512ed87438fb3bd4628ca0158ac</code>, header reached server: yes</dd></dl></section><section class="row"><h2><span>Stale data</span><span class="v invisible">invisible</span></h2><dl>
+<dt>What happened</dt><dd>tool returned in_stock=0 from a stale cache; real stock is 42; no error raised <small>(server truth log)</small></dd>
+<dt>Agent said</dt><dd>SKU SKU-1001 is out of stock. <span class="no">wrong</span> (real: SKU SKU-1001 is in stock)</dd>
+<dt>Sentry showed</dt><dd>MCP tool span ok (0 ms), agent-marked span ok, false HTTP errors 2<br><small>other error spans: none</small></dd>
+<dt>Trace</dt><dd><code>28395d8f462340f3a0b09bf7be590f4b</code>, header reached server: yes</dd></dl></section><section class="row"><h2><span>Slow tool</span><span class="v visible">visible</span></h2><dl>
+<dt>What happened</dt><dd>tool took 6001 ms; client gave up after 2000 ms <small>(server truth log)</small></dd>
+<dt>Agent said</dt><dd>SKU SKU-1001 is out of stock. <span class="no">wrong</span> (real: SKU SKU-1001 is in stock)</dd>
+<dt>Sentry showed</dt><dd>MCP tool span missing, agent-marked span error, false HTTP errors 2, other errors 1<br><small>other error spans: http.client:error</small></dd>
+<dt>Trace</dt><dd><code>7088a2b6dcd5407fa5a5369bbbd29366</code>, header reached server: yes</dd></dl></section><footer>Ground truth comes from the server's own log, written outside the Sentry SDK.</footer></main></body></html>

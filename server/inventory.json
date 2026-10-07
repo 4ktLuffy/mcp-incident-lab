@@ -1,0 +1,5 @@
+{
+  "SKU-1001": {"in_stock": 42, "warehouse": "WH-NORTH"},
+  "SKU-2002": {"in_stock": 0, "warehouse": "WH-SOUTH"},
+  "SKU-3003": {"in_stock": 7, "warehouse": "WH-NORTH"}
+}

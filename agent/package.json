@@ -1,0 +1,10 @@
+{
+  "name": "mcp-incident-lab-agent",
+  "type": "commonjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@sentry/node": "^11.4.0",
+    "openai": "^7.30.0"
+  },
+  "private": true
+}
